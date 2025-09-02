@@ -35,6 +35,16 @@ export function EmployeeDashboard() {
           api.get(`/employees/${user.id}/notifications`)
         ]);
 
+        // Check for unread notifications after fetching data
+        const unreadNotifications = notificationsRes.data.some((n: any) => n.status === 'unread');
+        const hasShownLoginToast = sessionStorage.getItem('loginNotificationShown');
+
+        if (unreadNotifications && !hasShownLoginToast) {
+          toast.info("You have new messages. Please check your notifications!");
+          // Set a flag in session storage to prevent the toast from showing again during this session
+          sessionStorage.setItem('loginNotificationShown', 'true');
+        }
+
         // Construct the full employee object for the state
         setEmployee({
           _id: user.id, // Use the ID from the logged-in user session
@@ -58,6 +68,8 @@ export function EmployeeDashboard() {
 
   const handleLogout = () => {
     localStorage.removeItem('user');
+     // Clear the session storage flag on logout
+    sessionStorage.removeItem('loginNotificationShown'); 
     toast.success("You have been logged out.");
     navigate('/login');
   };

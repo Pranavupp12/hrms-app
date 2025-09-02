@@ -36,6 +36,8 @@ const employeeSchema = new Schema({
   password: { type: String, required: true },
   role: { type: String, enum: ['Employee', 'Admin'], default: 'Employee' },
   attendance: [attendanceSchema],
+  fileName: { type: String },
+  filePath: { type: String }, 
   salaryHistory: [salarySchema],
   leaveRequests: [leaveRequestSchema],
   notifications: [notificationSchema],

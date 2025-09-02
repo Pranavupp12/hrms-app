@@ -38,6 +38,8 @@ export interface Employee {
   name: string;
   email: string;
   role: "Employee" | "Admin";
+  filePath?: string; 
+  fileName?: string; 
   attendance: Attendance[];
   salaryHistory: Salary[];
   leaveRequests: LeaveRequest[];

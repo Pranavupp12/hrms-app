@@ -12,15 +12,49 @@ exports.getAllEmployees = async (req, res) => {
     }
 };
 
+
 // Add a new employee
 exports.addEmployee = async (req, res) => {
-    const { name, email, password } = req.body;
+    const { name, email, password, role } = req.body;
     try {
-        const newEmployee = new Employee({ name, email, password, role: 'Employee' });
+        const newEmployeeData = {
+            name,
+            email,
+            password,
+            role: role || 'Employee',
+            filePath: req.file ? req.file.path : null,
+            fileName: req.file ? req.file.originalname : null // Save original filename
+        };
+        const newEmployee = new Employee(newEmployeeData);
         await newEmployee.save();
         res.status(201).json(newEmployee);
     } catch (error) {
         res.status(500).json({ message: 'Error adding employee' });
+    }
+};
+
+// Update an employee
+exports.updateEmployee = async (req, res) => {
+    try {
+        const { name, email, role, password } = req.body;
+        const updateData = { name, email, role };
+
+        if (password) {
+            updateData.password = password;
+        }
+
+        if (req.file) {
+            updateData.filePath = req.file.path;
+            updateData.fileName = req.file.originalname; // Save original filename on update
+        }
+        
+        const updatedEmployee = await Employee.findByIdAndUpdate(req.params.id, updateData, { new: true });
+        if (!updatedEmployee) {
+            return res.status(404).json({ message: 'Employee not found' });
+        }
+        res.json(updatedEmployee);
+    } catch (error) {
+        res.status(500).json({ message: 'Error updating employee' });
     }
 };
 
@@ -72,6 +106,38 @@ exports.rejectLeaveRequest = async (req, res) => {
         res.json(leaveRequest);
     } catch (error) {
         res.status(500).json({ message: 'Error rejecting leave request' });
+    }
+};
+
+
+
+// Get notifications for the logged-in admin
+exports.getAdminNotifications = async (req, res) => {
+    try {
+        const admin = await Employee.findById(req.params.id);
+        if (!admin) return res.status(404).json({ message: 'Admin not found' });
+        res.json(admin.notifications);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching admin notifications' });
+    }
+};
+
+// Mark a notification as read for the logged-in admin
+exports.markNotificationAsRead = async (req, res) => {
+    try {
+        const admin = await Employee.findById(req.params.id);
+        if (!admin) return res.status(404).json({ message: 'Admin not found' });
+
+        const notification = admin.notifications.id(req.params.notificationId);
+        if (notification) {
+            notification.status = 'read';
+            await admin.save();
+            res.json(notification);
+        } else {
+            res.status(404).json({ message: 'Notification not found' });
+        }
+    } catch (error) {
+        res.status(500).json({ message: 'Error updating notification' });
     }
 };
 
