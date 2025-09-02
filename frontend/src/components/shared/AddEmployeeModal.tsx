@@ -6,9 +6,11 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 // Define the shape of the data this modal will submit
+// This now includes the password field to match the backend requirement
 interface NewEmployeeData {
   name: string;
   email: string;
+  password: string;
 }
 
 // Define the props for our component
@@ -21,16 +23,17 @@ export function AddEmployeeModal({ onSubmit, children }: AddEmployeeModalProps) 
   const [isOpen, setIsOpen] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState(""); // State for the password
 
   const handleSubmit = () => {
     // Basic validation
-    if (!name || !email) {
-      toast.error("Please enter both name and email.");
+    if (!name || !email || !password) {
+      toast.error("Please fill out all fields.");
       return;
     }
 
     // Call the onSubmit prop passed from the parent component
-    onSubmit({ name, email });
+    onSubmit({ name, email, password });
     
     // Close the modal
     setIsOpen(false);
@@ -38,6 +41,7 @@ export function AddEmployeeModal({ onSubmit, children }: AddEmployeeModalProps) 
     // Reset the form fields for the next time
     setName("");
     setEmail("");
+    setPassword("");
   };
 
   return (
@@ -53,6 +57,10 @@ export function AddEmployeeModal({ onSubmit, children }: AddEmployeeModalProps) 
           <div className="grid gap-2">
             <Label htmlFor="email">Email</Label>
             <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="john.doe@example.com"/>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="password">Password</Label>
+            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter a secure password"/>
           </div>
           <Button onClick={handleSubmit}>Save Employee</Button>
         </div>

@@ -1,0 +1,153 @@
+const mongoose = require('mongoose');
+const Employee = require('../models/Employee');
+const SentNotification = require('../models/SentNotification');
+
+// Fetch all employees
+exports.getAllEmployees = async (req, res) => {
+    try {
+        const employees = await Employee.find().select('-password');
+        res.json(employees);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching employees' });
+    }
+};
+
+// Add a new employee
+exports.addEmployee = async (req, res) => {
+    const { name, email, password } = req.body;
+    try {
+        const newEmployee = new Employee({ name, email, password, role: 'Employee' });
+        await newEmployee.save();
+        res.status(201).json(newEmployee);
+    } catch (error) {
+        res.status(500).json({ message: 'Error adding employee' });
+    }
+};
+
+// Delete an employee
+exports.deleteEmployee = async (req, res) => {
+    try {
+        await Employee.findByIdAndDelete(req.params.id);
+        res.json({ message: 'Employee deleted' });
+    } catch (error) {
+        res.status(500).json({ message: 'Error deleting employee' });
+    }
+};
+
+// Fetch all leave requests
+exports.getAllLeaveRequests = async (req, res) => {
+    try {
+        const employees = await Employee.find();
+        const leaveRequests = employees.flatMap(emp => emp.leaveRequests.map(lr => ({ ...lr.toObject(), employeeName: emp.name, id: lr._id })));
+        res.json(leaveRequests);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching leave requests' });
+    }
+};
+
+// Approve a leave request
+exports.approveLeaveRequest = async (req, res) => {
+    try {
+        const employee = await Employee.findOne({ 'leaveRequests._id': req.params.leaveId });
+        if (!employee) return res.status(404).json({ message: 'Leave request not found.' });
+        const leaveRequest = employee.leaveRequests.id(req.params.leaveId);
+        leaveRequest.status = 'Approved';
+        await employee.save();
+        res.json(leaveRequest);
+    } catch (error) {
+        res.status(500).json({ message: 'Error approving leave request' });
+    }
+};
+
+// Reject a leave request
+exports.rejectLeaveRequest = async (req, res) => {
+    const { rejectionReason } = req.body;
+    try {
+        const employee = await Employee.findOne({ 'leaveRequests._id': req.params.leaveId });
+        if (!employee) return res.status(404).json({ message: 'Leave request not found.' });
+        const leaveRequest = employee.leaveRequests.id(req.params.leaveId);
+        leaveRequest.status = 'Rejected';
+        leaveRequest.rejectionReason = rejectionReason;
+        await employee.save();
+        res.json(leaveRequest);
+    } catch (error) {
+        res.status(500).json({ message: 'Error rejecting leave request' });
+    }
+};
+
+// Fetch sent notifications history
+exports.getSentNotifications = async (req, res) => {
+    try {
+        const notifications = await SentNotification.find();
+        res.json(notifications);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching sent notifications' });
+    }
+};
+
+// Send a notification - CORRECTED LOGIC
+exports.sendNotification = async (req, res) => {
+    const { recipient, message } = req.body;
+    const newNotification = {
+        message,
+        date: new Date().toISOString().slice(0, 10),
+        status: 'unread'
+    };
+
+    try {
+        let recipientName = 'All Employees';
+
+        if (recipient === 'all') {
+            await Employee.updateMany({}, { $push: { notifications: newNotification } });
+        } else {
+            // Validate if the recipient is a valid ObjectId before querying
+            if (!mongoose.Types.ObjectId.isValid(recipient)) {
+                return res.status(400).json({ message: 'Invalid recipient ID.' });
+            }
+            const employee = await Employee.findByIdAndUpdate(recipient, { $push: { notifications: newNotification } });
+            if (employee) {
+                recipientName = employee.name;
+            } else {
+                return res.status(404).json({ message: 'Recipient employee not found.' });
+            }
+        }
+
+        const sentNotification = new SentNotification({
+            date: newNotification.date,
+            message,
+            recipient: recipientName,
+        });
+
+        await sentNotification.save();
+        res.status(201).json(sentNotification);
+    } catch (error) {
+        console.error("Error sending notification:", error);
+        res.status(500).json({ message: 'Error sending notification' });
+    }
+};
+
+
+// Fetch salary history for all employees
+exports.getSalaryHistory = async (req, res) => {
+    try {
+        const employees = await Employee.find().select('name salaryHistory');
+        const salaryHistory = employees.flatMap(emp => emp.salaryHistory.map(sh => ({ ...sh.toObject(), employeeName: emp.name, id: sh._id })));
+        res.json(salaryHistory);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching salary history' });
+    }
+};
+
+// Punch in salary for an employee
+exports.punchSalary = async (req, res) => {
+    const { employeeId, amount, month } = req.body;
+    try {
+        const employee = await Employee.findById(employeeId);
+        if (!employee) return res.status(404).json({ message: 'Employee not found.' });
+        employee.salaryHistory.push({ amount, month, status: 'Paid', date: new Date().toISOString().slice(0, 10) });
+        await employee.save();
+        res.status(201).json(employee.salaryHistory);
+    } catch (error) {
+        res.status(500).json({ message: 'Error punching salary' });
+    }
+};

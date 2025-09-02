@@ -2,7 +2,7 @@
 export type LeaveStatus = "Pending" | "Approved" | "Rejected";
 
 export interface LeaveRequest {
-  id: string;
+  _id: string;
   type: string;
   startDate: string;
   endDate: string;
@@ -12,7 +12,7 @@ export interface LeaveRequest {
 }
 
 export interface Notification {
-  id: string;
+  _id: string;
   message: string;
   date: string;
   status: "read" | "unread";
@@ -33,6 +33,7 @@ export interface Attendance {
 }
 
 export interface Employee {
+  _id: string;
   id: string;
   name: string;
   email: string;
@@ -44,7 +45,7 @@ export interface Employee {
 }
 
 export interface SentNotification {
-  id: string;
+  _id: string;
   date: string;
   message: string;
   recipient: 'All Employees' | string; // Can be 'All Employees' or a specific employee's name

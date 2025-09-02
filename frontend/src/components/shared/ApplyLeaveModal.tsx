@@ -3,7 +3,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea"; // 1. Import Textarea
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { LeaveRequest } from "@/types";
 import { format } from "date-fns";
@@ -12,7 +12,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 interface ApplyLeaveModalProps {
-  onSubmit: (newLeaveRequest: Omit<LeaveRequest, 'id'>) => void;
+  onSubmit: (newLeaveRequest: Omit<LeaveRequest, '_id' | 'status' | 'id'>) => void;
   children: React.ReactNode;
 }
 
@@ -21,7 +21,7 @@ export function ApplyLeaveModal({ onSubmit, children }: ApplyLeaveModalProps) {
   const [leaveType, setLeaveType] = useState<string>("");
   const [startDate, setStartDate] = useState<Date | undefined>();
   const [endDate, setEndDate] = useState<Date | undefined>();
-  const [reason, setReason] = useState<string>(""); // 2. Add state for the reason
+  const [reason, setReason] = useState<string>("");
 
   const handleApplyLeave = () => {
     if (!leaveType || !startDate || !endDate) {
@@ -33,8 +33,7 @@ export function ApplyLeaveModal({ onSubmit, children }: ApplyLeaveModalProps) {
       type: leaveType,
       startDate: format(startDate, "yyyy-MM-dd"),
       endDate: format(endDate, "yyyy-MM-dd"),
-      status: "Pending" as const,
-      reason: reason, // 3. Include the reason in the submitted data
+      reason: reason,
     };
 
     onSubmit(newLeaveRequest);
@@ -45,7 +44,7 @@ export function ApplyLeaveModal({ onSubmit, children }: ApplyLeaveModalProps) {
     setLeaveType("");
     setStartDate(undefined);
     setEndDate(undefined);
-    setReason(""); // 4. Reset the reason field
+    setReason("");
   };
 
   return (
@@ -58,8 +57,8 @@ export function ApplyLeaveModal({ onSubmit, children }: ApplyLeaveModalProps) {
             <SelectTrigger><SelectValue placeholder="Select Leave Type" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="Sick Leave">Sick Leave</SelectItem>
-              <SelectItem value="Vacation">Vacation</SelectItem>
-              <SelectItem value="Personal Leave">Personal Leave</SelectItem>
+              <SelectItem value="Vacation">Annual Leave</SelectItem>
+              <SelectItem value="Personal Leave">Emergency Leave</SelectItem>
             </SelectContent>
           </Select>
           <Popover>
@@ -80,7 +79,6 @@ export function ApplyLeaveModal({ onSubmit, children }: ApplyLeaveModalProps) {
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={endDate} onSelect={setEndDate} initialFocus /></PopoverContent>
           </Popover>
-          {/* 5. Add the Textarea for the reason */}
           <Textarea
             placeholder="Enter the reason for your leave (optional)"
             value={reason}

@@ -3,50 +3,98 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { mockEmployee } from "@/data/mock";
-import type { LeaveRequest } from "@/types";
-import { useState } from "react";
+import type { Employee, LeaveRequest } from "@/types";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ApplyLeaveModal } from "@/components/shared/ApplyLeaveModal";
 import { Bell } from "lucide-react";
-import { ViewCommentModal } from "@/components/shared/ViewCommentModal"; 
+import { ViewCommentModal } from "@/components/shared/ViewCommentModal";
+import api from '@/api';
 
 export function EmployeeDashboard() {
-  const [employee, setEmployee] = useState(mockEmployee);
+  const [employee, setEmployee] = useState<Employee | null>(null);
   const navigate = useNavigate();
 
+  // The user object from localStorage contains 'id' which is an alias for '_id' from the backend
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+
+  useEffect(() => {
+    if (!user?.id) {
+      navigate('/login');
+      return;
+    }
+
+    const fetchEmployeeData = async () => {
+      try {
+        // Fetch all related data for the employee dashboard
+        const [attendanceRes, salaryRes, leavesRes, notificationsRes] = await Promise.all([
+          api.get(`/employees/${user.id}/attendance`),
+          api.get(`/employees/${user.id}/salaries`),
+          api.get(`/employees/${user.id}/leaves`),
+          api.get(`/employees/${user.id}/notifications`)
+        ]);
+
+        // Construct the full employee object for the state
+        setEmployee({
+          _id: user.id, // Use the ID from the logged-in user session
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          attendance: attendanceRes.data,
+          salaryHistory: salaryRes.data,
+          leaveRequests: leavesRes.data,
+          notifications: notificationsRes.data,
+        });
+      } catch (error) {
+        toast.error('Failed to fetch employee data.');
+        console.error(error);
+      }
+    };
+
+    fetchEmployeeData();
+  }, [user.id, navigate]);
+
   const handleLogout = () => {
+    localStorage.removeItem('user');
     toast.success("You have been logged out.");
     navigate('/login');
   };
 
-  const handleLeaveSubmit = (newLeaveRequestData: Omit<LeaveRequest, 'id' | 'status'>) => {
-    const newLeaveRequest: LeaveRequest = {
-      ...newLeaveRequestData,
-      id: `leave-${crypto.randomUUID()}`,
-      status: "Pending",
-    };
-    setEmployee(prev => ({
-      ...prev,
-      leaveRequests: [...prev.leaveRequests, newLeaveRequest]
-    }));
+  // The modal will provide a LeaveRequest object without the `_id` or `status`
+  const handleLeaveSubmit = async (newLeaveRequestData: Omit<LeaveRequest, '_id' | 'status'>) => {
+    try {
+      await api.post(`/employees/${user.id}/leaves`, newLeaveRequestData);
+      // Refetch leave requests to update the list
+      const response = await api.get(`/employees/${user.id}/leaves`);
+      setEmployee(prev => prev ? { ...prev, leaveRequests: response.data } : null);
+      toast.success("Leave request submitted successfully!");
+    } catch (error) {
+      toast.error("Failed to submit leave request.");
+    }
   };
 
-  // Function to mark a notification as read
-  const handleMarkAsRead = (notificationId: string) => {
-    setEmployee(prev => ({
-      ...prev,
-      notifications: prev.notifications.map(notif =>
-        notif.id === notificationId ? { ...notif, status: 'read' } : notif
-      )
-    }));
-    toast.info("Notification marked as read.");
+  const handleMarkAsRead = async (notificationId: string) => {
+    try {
+        await api.put(`/employees/${user.id}/notifications/${notificationId}`);
+        setEmployee(prev => prev ? {
+            ...prev,
+            // Update the status of the correct notification using `_id`
+            notifications: prev.notifications.map(n => n._id === notificationId ? { ...n, status: 'read' } : n)
+        } : null);
+        toast.info("Notification marked as read.");
+    } catch (error) {
+        toast.error("Failed to mark notification as read.");
+    }
   };
+
+  if (!employee) {
+    return <div className="p-8">Loading...</div>;
+  }
 
   return (
     <div className="p-8 space-y-8">
-      {/* Aligned Header using Flexbox */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Welcome, {employee.name}!</h1>
         <Button variant="outline" onClick={handleLogout}>Logout</Button>
@@ -60,7 +108,6 @@ export function EmployeeDashboard() {
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
         </TabsList>
 
-        {/* Attendance Tab */}
         <TabsContent value="attendance" className="mt-4">
           <Card>
             <CardHeader><CardTitle>My Attendance</CardTitle></CardHeader>
@@ -89,7 +136,6 @@ export function EmployeeDashboard() {
           </Card>
         </TabsContent>
 
-        {/* Salary Tab */}
         <TabsContent value="salary" className="mt-4">
           <Card>
             <CardHeader><CardTitle>My Salary History</CardTitle></CardHeader>
@@ -116,7 +162,6 @@ export function EmployeeDashboard() {
           </Card>
         </TabsContent>
 
-        {/* Leave Requests Tab */}
         <TabsContent value="leaves" className="mt-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
@@ -133,18 +178,17 @@ export function EmployeeDashboard() {
                     <TableHead>Start Date</TableHead>
                     <TableHead>End Date</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead> {/* 2. Add Actions column header */}
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {employee.leaveRequests.map((req) => (
-                    <TableRow key={req.id}>
+                    <TableRow key={req._id}>
                       <TableCell>{req.type}</TableCell>
                       <TableCell>{req.startDate}</TableCell>
                       <TableCell>{req.endDate}</TableCell>
                       <TableCell><Badge>{req.status}</Badge></TableCell>
                       <TableCell>
-                        {/* 3. Conditionally render the button and modal */}
                         {req.status === 'Rejected' && req.rejectionReason && (
                           <ViewCommentModal reason={req.rejectionReason}>
                             <Button variant="outline" size="sm">View Comment</Button>
@@ -159,7 +203,6 @@ export function EmployeeDashboard() {
           </Card>
         </TabsContent>
 
-        {/* Notifications Tab */}
         <TabsContent value="notifications" className="mt-4">
           <Card>
             <CardHeader>
@@ -171,7 +214,7 @@ export function EmployeeDashboard() {
               <div className="space-y-4">
                 {employee.notifications.length > 0 ? (
                   employee.notifications.map(notification => (
-                    <div key={notification.id} className="flex items-start justify-between p-4 rounded-lg border">
+                    <div key={notification._id} className="flex items-start justify-between p-4 rounded-lg border">
                       <div className="flex items-start space-x-4">
                         <span className={`mt-1.5 h-2 w-2 rounded-full ${notification.status === 'unread' ? 'bg-blue-500' : 'bg-gray-300'}`} />
                         <div className="flex flex-col">
@@ -180,7 +223,7 @@ export function EmployeeDashboard() {
                         </div>
                       </div>
                       {notification.status === 'unread' && (
-                        <Button variant="ghost" size="sm" onClick={() => handleMarkAsRead(notification.id)}>
+                        <Button variant="ghost" size="sm" onClick={() => handleMarkAsRead(notification._id)}>
                           Mark as Read
                         </Button>
                       )}

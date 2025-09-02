@@ -3,25 +3,32 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom"; // 1. Import the hook
+import { useNavigate } from "react-router-dom";
+import api from '@/api'; 
+import { toast } from "sonner";
 
 export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const navigate = useNavigate(); // 2. Initialize the hook
+  const navigate = useNavigate();
 
-  const handleLogin = () => {
-    // This is where you'll call your backend API.
-    // For now, we'll simulate it based on the email.
-    console.log("Logging in with:", { email, password });
+  const handleLogin = async () => {
+    try {
+      const response = await api.post('/auth/login', { email, password });
+      const { user } = response.data;
 
-    // 3. Add navigation logic
-    if (email.includes('admin')) {
-      // If the email contains 'admin', go to the admin dashboard
-      navigate('/admin');
-    } else {
-      // Otherwise, go to the employee dashboard
-      navigate('/dashboard');
+      // Store user info in local storage to persist session
+      localStorage.setItem('user', JSON.stringify(user));
+      toast.success('Login successful!');
+
+      if (user.role === 'Admin') {
+        navigate('/admin');
+      } else {
+        navigate('/dashboard');
+      }
+    } catch (error) {
+      toast.error('Login failed. Please check your credentials.');
+      console.error('Login error:', error);
     }
   };
 
@@ -60,6 +67,22 @@ export function LoginPage() {
             <Button onClick={handleLogin} className="w-full">
               Sign In
             </Button>
+            {/* Test Credentials Section */}
+            <div className="mt-4 p-4 border rounded-lg bg-gray-50 text-sm text-gray-600">
+              <h3 className="font-bold text-center mb-2">Test Accounts</h3>
+              <div className="space-y-2">
+                <div>
+                  <p className="font-semibold">Admin:</p>
+                  <p>Email: <span className="font-mono">admin@example.com</span></p>
+                  <p>Password: <span className="font-mono">password123</span></p>
+                </div>
+                <div>
+                  <p className="font-semibold">Employee:</p>
+                  <p>Email: <span className="font-mono">john.doe@example.com</span></p>
+                  <p>Password: <span className="font-mono">password123</span></p>
+                </div>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>

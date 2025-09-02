@@ -6,143 +6,134 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { AddEmployeeModal } from "@/components/shared/AddEmployeeModal";
-import { RejectLeaveModal } from "@/components/shared/RejectLeaveModal";
-import { mockAllEmployees, mockSentNotifications } from "@/data/mock";
-import type { Employee, Salary, SentNotification } from "@/types";
-import { format } from "date-fns";
-import { useState } from "react";
+import { AddEmployeeModal } from "../../components/shared/AddEmployeeModal";
+import { RejectLeaveModal } from "../../components/shared/RejectLeaveModal";
+import type { Employee, Salary, SentNotification, LeaveRequest } from "@/types";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import api from '../../api';
 
 export function AdminDashboard() {
-  const [allEmployees, setAllEmployees] = useState<Employee[]>(mockAllEmployees);
-  const [sentNotifications, setSentNotifications] = useState<SentNotification[]>(mockSentNotifications);
+  const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<(LeaveRequest & { employeeName: string; id: string; })[]>([]);
+  const [salaryHistory, setSalaryHistory] = useState<(Salary & { employeeName: string; id: string })[]>([]);
+  const [sentNotifications, setSentNotifications] = useState<SentNotification[]>([]);
+
   const [notificationMessage, setNotificationMessage] = useState("");
   const [notificationRecipient, setNotificationRecipient] = useState("all");
-
   const [salaryEmployeeId, setSalaryEmployeeId] = useState('');
   const [salaryAmount, setSalaryAmount] = useState<number | ''>('');
   const [salaryMonth, setSalaryMonth] = useState('');
-  
+
   const navigate = useNavigate();
 
-  const allLeaveRequests = allEmployees.flatMap(emp =>
-    emp.leaveRequests.map(req => ({ ...req, employeeName: emp.name }))
-  );
-
-  const allSalaryHistory = allEmployees
-    .flatMap(emp => 
-      emp.salaryHistory.map(sal => ({
-        ...sal,
-        id: `${emp.id}-${sal.month}`,
-        employeeName: emp.name,
-      }))
-    )
-    .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
-
-
-  const handleApproveLeave = (leaveId: string) => {
-    setAllEmployees(prevEmployees =>
-      prevEmployees.map(emp => ({
-        ...emp,
-        leaveRequests: emp.leaveRequests.map(req =>
-          req.id === leaveId ? { ...req, status: 'Approved' } : req
-        ),
-      }))
-    );
-    toast.success(`Leave request ${leaveId} has been approved.`);
-  };
-  
-  const handleRejectLeave = (leaveId: string, reason: string) => {
-    setAllEmployees(prevEmployees =>
-      prevEmployees.map(emp => ({
-        ...emp,
-        leaveRequests: emp.leaveRequests.map(req =>
-          req.id === leaveId
-            ? { ...req, status: 'Rejected', rejectionReason: reason }
-            : req
-        ),
-      }))
-    );
-    toast.error(`Leave request ${leaveId} has been rejected.`);
+  const fetchData = async () => {
+    try {
+      const [employeesRes, leavesRes, salariesRes, notificationsRes] = await Promise.all([
+        api.get('/admin/employees'),
+        api.get('/admin/leave-requests'),
+        api.get('/admin/salaries'),
+        api.get('/admin/notifications')
+      ]);
+      setAllEmployees(employeesRes.data);
+      setLeaveRequests(leavesRes.data);
+      setSalaryHistory(salariesRes.data);
+      setSentNotifications(notificationsRes.data);
+    } catch (error) {
+      toast.error('Failed to fetch data.');
+      console.error(error);
+    }
   };
 
-  const handleDeleteEmployee = (employeeId: string) => {
-    setAllEmployees(prev => prev.filter(emp => emp.id !== employeeId));
-    toast.info(`Employee ${employeeId} has been deleted.`);
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const handleApproveLeave = async (leaveId: string) => {
+    try {
+      await api.put(`/admin/leave-requests/${leaveId}/approve`);
+      fetchData();
+      toast.success(`Leave request has been approved.`);
+    } catch (error) {
+      toast.error('Failed to approve leave request.');
+    }
   };
 
-  const handleAddNewEmployee = (newEmployeeData: { name: string; email: string }) => {
-    const newEmployee: Employee = {
-      ...newEmployeeData,
-      id: `emp-${crypto.randomUUID().slice(0, 4)}`,
-      role: "Employee",
-      attendance: [],
-      salaryHistory: [],
-      leaveRequests: [],
-      notifications: [],
-    };
-    setAllEmployees(prev => [newEmployee, ...prev]);
+  const handleRejectLeave = async (leaveId: string, reason: string) => {
+    try {
+      await api.put(`/admin/leave-requests/${leaveId}/reject`, { rejectionReason: reason });
+      fetchData();
+      toast.error(`Leave request has been rejected.`);
+    } catch (error) {
+      toast.error('Failed to reject leave request.');
+    }
   };
 
-  const handleSendNotification = () => {
+  const handleDeleteEmployee = async (employeeId: string) => {
+    try {
+      await api.delete(`/admin/employees/${employeeId}`);
+      fetchData();
+      toast.info(`Employee has been deleted.`);
+    } catch (error) {
+      toast.error('Failed to delete employee.');
+    }
+  };
+
+  const handleAddNewEmployee = async (newEmployeeData: { name: string; email: string; password: string }) => {
+    try {
+      await api.post('/admin/employees', newEmployeeData);
+      fetchData();
+      toast.success('New employee added.');
+    } catch (error) {
+      toast.error('Failed to add employee.');
+    }
+  };
+
+  const handleSendNotification = async () => {
     if (!notificationMessage.trim()) {
       toast.error("Notification message cannot be empty.");
       return;
     }
-    
-    const recipientName = notificationRecipient === 'all'
-      ? 'All Employees'
-      : allEmployees.find(emp => emp.id === notificationRecipient)?.name || 'Unknown';
 
-    const newNotification: SentNotification = {
-      id: `sent-${crypto.randomUUID().slice(0, 4)}`,
-      date: format(new Date(), "yyyy-MM-dd"),
-      message: notificationMessage,
-      recipient: recipientName,
-    };
-    
-    setSentNotifications(prev => [newNotification, ...prev]);
-    toast.success(`Notification sent to ${recipientName}.`);
-
-    setNotificationMessage("");
-    setNotificationRecipient("all");
+    try {
+      await api.post('/admin/notifications', {
+        recipient: notificationRecipient,
+        message: notificationMessage
+      });
+      fetchData();
+      toast.success(`Notification sent.`);
+      setNotificationMessage("");
+      setNotificationRecipient("all");
+    } catch (error) {
+      toast.error('Failed to send notification.');
+    }
   };
 
-  const handleSalaryPunchIn = () => {
+  const handleSalaryPunchIn = async () => {
     if (!salaryEmployeeId || !salaryAmount || !salaryMonth.trim()) {
-      toast.error("Please fill out all salary fields before punching in.");
+      toast.error("Please fill out all salary fields.");
       return;
     }
 
-    setAllEmployees(prevEmployees => 
-      prevEmployees.map(emp => {
-        if (emp.id === salaryEmployeeId) {
-          const newSalaryRecord: Salary = {
-            month: salaryMonth,
-            amount: Number(salaryAmount),
-            status: 'Paid',
-            date: format(new Date(), "yyyy-MM-dd"),
-          };
-          return {
-            ...emp,
-            salaryHistory: [newSalaryRecord, ...emp.salaryHistory],
-          };
-        }
-        return emp;
-      })
-    );
-
-    const employeeName = allEmployees.find(e => e.id === salaryEmployeeId)?.name;
-    toast.success(`Salary of ₹${salaryAmount.toLocaleString()} for ${salaryMonth} punched in for ${employeeName}.`);
-    
-    setSalaryEmployeeId('');
-    setSalaryAmount('');
-    setSalaryMonth('');
+    try {
+      await api.post('/admin/salary', {
+        employeeId: salaryEmployeeId,
+        amount: salaryAmount,
+        month: salaryMonth
+      });
+      fetchData();
+      toast.success(`Salary punched in.`);
+      setSalaryEmployeeId('');
+      setSalaryAmount('');
+      setSalaryMonth('');
+    } catch (error) {
+      toast.error('Failed to punch in salary.');
+    }
   };
 
   const handleLogout = () => {
+    localStorage.removeItem('user');
     toast.success("You have been logged out.");
     navigate('/login');
   };
@@ -163,133 +154,133 @@ export function AdminDashboard() {
         </TabsList>
 
         <TabsContent value="leave-requests" className="mt-4">
-            <Card>
-                <CardHeader><CardTitle>Pending Leave Requests</CardTitle></CardHeader>
-                <CardContent>
-                <Table>
-                    <TableHeader>
-                    <TableRow>
-                        <TableHead>Employee</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Dates</TableHead>
-                        <TableHead>Reason</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
+          <Card>
+            <CardHeader><CardTitle>Pending Leave Requests</CardTitle></CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Dates</TableHead>
+                    <TableHead>Reason</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {leaveRequests.map((req) => (
+                    <TableRow key={req.id}>
+                      <TableCell>{req.employeeName}</TableCell>
+                      <TableCell>{req.type}</TableCell>
+                      <TableCell>{req.startDate} to {req.endDate}</TableCell>
+                      <TableCell className="max-w-xs truncate">{req.reason || 'N/A'}</TableCell>
+                      <TableCell><Badge>{req.status}</Badge></TableCell>
+                      <TableCell className="space-x-2">
+                        {req.status === 'Pending' && (
+                          <>
+                            <Button size="sm" onClick={() => handleApproveLeave(req.id)}>Approve</Button>
+                            <RejectLeaveModal onSubmit={(reason) => handleRejectLeave(req.id, reason)}>
+                              <Button size="sm" variant="destructive">Reject</Button>
+                            </RejectLeaveModal>
+                          </>
+                        )}
+                      </TableCell>
                     </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                    {allLeaveRequests.map((req) => (
-                        <TableRow key={req.id}>
-                        <TableCell>{req.employeeName}</TableCell>
-                        <TableCell>{req.type}</TableCell>
-                        <TableCell>{req.startDate} to {req.endDate}</TableCell>
-                        <TableCell className="max-w-xs truncate">{req.reason || 'N/A'}</TableCell>
-                        <TableCell><Badge>{req.status}</Badge></TableCell>
-                        <TableCell className="space-x-2">
-                            {req.status === 'Pending' && (
-                            <>
-                                <Button size="sm" onClick={() => handleApproveLeave(req.id)}>Approve</Button>
-                                <RejectLeaveModal onSubmit={(reason) => handleRejectLeave(req.id, reason)}>
-                                  <Button size="sm" variant="destructive">Reject</Button>
-                                </RejectLeaveModal>
-                            </>
-                            )}
-                        </TableCell>
-                        </TableRow>
-                    ))}
-                    </TableBody>
-                </Table>
-                </CardContent>
-            </Card>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="employees" className="mt-4">
-            <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>All Employees</CardTitle>
-                <AddEmployeeModal onSubmit={handleAddNewEmployee}>
-                    <Button>Add Employee</Button>
-                </AddEmployeeModal>
-                </CardHeader>
-                <CardContent>
-                <Table>
-                    <TableHeader>
-                    <TableRow>
-                        <TableHead>ID</TableHead>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Actions</TableHead>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>All Employees</CardTitle>
+              <AddEmployeeModal onSubmit={handleAddNewEmployee}>
+                <Button>Add Employee</Button>
+              </AddEmployeeModal>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allEmployees.map((emp) => (
+                    <TableRow key={emp._id}>
+                      <TableCell>{emp._id}</TableCell>
+                      <TableCell>{emp.name}</TableCell>
+                      <TableCell>{emp.email}</TableCell>
+                      <TableCell>
+                        <Button variant="destructive" size="sm" onClick={() => handleDeleteEmployee(emp._id)}>Delete</Button>
+                      </TableCell>
                     </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                    {allEmployees.map((emp) => (
-                        <TableRow key={emp.id}>
-                        <TableCell>{emp.id}</TableCell>
-                        <TableCell>{emp.name}</TableCell>
-                        <TableCell>{emp.email}</TableCell>
-                        <TableCell>
-                            <Button variant="destructive" size="sm" onClick={() => handleDeleteEmployee(emp.id)}>Delete</Button>
-                        </TableCell>
-                        </TableRow>
-                    ))}
-                    </TableBody>
-                </Table>
-                </CardContent>
-            </Card>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </TabsContent>
-        
-        <TabsContent value="notifications" className="mt-4 space-y-6">
-            <Card>
-                <CardHeader><CardTitle>Send a New Notification</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                    <div>
-                        <Label htmlFor="recipient">Recipient</Label>
-                        <select
-                          id="recipient"
-                          className="w-full p-2 border rounded mt-1 bg-background"
-                          value={notificationRecipient}
-                          onChange={(e) => setNotificationRecipient(e.target.value)}
-                        >
-                            <option value="all">All Employees</option>
-                            {allEmployees.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <Label htmlFor="message">Message</Label>
-                        <Textarea
-                          id="message"
-                          placeholder="Type your notification here..."
-                          value={notificationMessage}
-                          onChange={(e) => setNotificationMessage(e.target.value)}
-                        />
-                    </div>
-                    <Button onClick={handleSendNotification}>Send Notification</Button>
-                </CardContent>
-            </Card>
 
-            <Card>
-              <CardHeader><CardTitle>Sent Notifications History</CardTitle></CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Message</TableHead>
-                      <TableHead>Recipient</TableHead>
+        <TabsContent value="notifications" className="mt-4 space-y-6">
+          <Card>
+            <CardHeader><CardTitle>Send a New Notification</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <Label htmlFor="recipient">Recipient</Label>
+                <select
+                  id="recipient"
+                  className="w-full p-2 border rounded mt-1 bg-background"
+                  value={notificationRecipient}
+                  onChange={(e) => setNotificationRecipient(e.target.value)}
+                >
+                  <option value="all">All Employees</option>
+                  {allEmployees.map(emp => <option key={emp._id} value={emp._id}>{emp.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <Label htmlFor="message">Message</Label>
+                <Textarea
+                  id="message"
+                  placeholder="Type your notification here..."
+                  value={notificationMessage}
+                  onChange={(e) => setNotificationMessage(e.target.value)}
+                />
+              </div>
+              <Button onClick={handleSendNotification}>Send Notification</Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Sent Notifications History</CardTitle></CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Message</TableHead>
+                    <TableHead>Recipient</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sentNotifications.map(notif => (
+                    <TableRow key={notif._id}>
+                      <TableCell className="whitespace-nowrap">{notif.date}</TableCell>
+                      <TableCell className="max-w-md truncate">{notif.message}</TableCell>
+                      <TableCell>{notif.recipient}</TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sentNotifications.map(notif => (
-                      <TableRow key={notif.id}>
-                        <TableCell className="whitespace-nowrap">{notif.date}</TableCell>
-                        <TableCell className="max-w-md truncate">{notif.message}</TableCell>
-                        <TableCell>{notif.recipient}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="salary-punch" className="mt-4 space-y-6">
@@ -306,7 +297,7 @@ export function AdminDashboard() {
                 >
                   <option value="" disabled>Select an employee...</option>
                   {allEmployees.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                    <option key={emp._id} value={emp._id}>{emp.name}</option>
                   ))}
                 </select>
               </div>
@@ -347,7 +338,7 @@ export function AdminDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {allSalaryHistory.map((sal) => (
+                  {salaryHistory.map((sal) => (
                     <TableRow key={sal.id}>
                       <TableCell>{sal.employeeName}</TableCell>
                       <TableCell>{sal.month}</TableCell>
@@ -364,3 +355,5 @@ export function AdminDashboard() {
     </div>
   );
 }
+
+
