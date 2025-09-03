@@ -481,9 +481,7 @@ export function AdminDashboard() {
                               : "outline"
                           }
                           className={
-                            att.status === "Punched In"
-                              ? "bg-yellow-500 text-black"
-                              : att.status === "Not Punched In"
+                              att.status === "Not Punched In"
                               ? "bg-gray-200 text-gray-700"
                               : ""
                           }
