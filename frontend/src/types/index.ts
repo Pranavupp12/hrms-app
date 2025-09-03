@@ -1,6 +1,10 @@
 // src/types/index.ts
 export type LeaveStatus = "Pending" | "Approved" | "Rejected";
 
+export type PunchStatus = 'punched-out' | 'punched-in' | 'completed';
+
+export type AttendanceStatus = "Present" | "Absent" | "On Leave" | "Punched In" | "Not Punched In" ;
+
 export interface LeaveRequest {
   _id: string;
   type: string;
@@ -29,7 +33,13 @@ export interface Attendance {
   date: string;
   checkIn: string;
   checkOut: string;
-  status: "Present" | "Absent" | "On Leave";
+  status: AttendanceStatus;
+}
+
+export interface AllUserAttendance extends Attendance {
+  employeeId: string;
+  employeeName: string;
+  role: string;
 }
 
 export interface Employee {

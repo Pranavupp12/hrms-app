@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 require('dotenv').config();
 const path = require('path');
+const { scheduleAttendanceJob } = require('./cron/attendanceMarker');
 
 
 const employeeRoutes = require('./routes/employeeRoutes');
@@ -36,6 +37,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/auth', authRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/admin', adminRoutes);
+
+scheduleAttendanceJob();
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);

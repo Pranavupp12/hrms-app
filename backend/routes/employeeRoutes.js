@@ -8,5 +8,8 @@ router.get('/:id/leaves', employeeController.getLeaveRequests);
 router.post('/:id/leaves', employeeController.applyForLeave);
 router.get('/:id/notifications', employeeController.getNotifications);
 router.put('/:id/notifications/:notificationId', employeeController.markNotificationAsRead);
+router.post('/:id/punch-in', employeeController.punchIn);
+router.post('/:id/punch-out', employeeController.punchOut);
+
 
 module.exports = router;

@@ -1,14 +1,14 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { Employee, LeaveRequest, AppNotification } from "@/types";
+import type { PunchStatus, Employee, LeaveRequest, AppNotification } from "@/types";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ApplyLeaveModal } from "@/components/shared/ApplyLeaveModal";
-import { Bell, UserCircle2, LogOut  } from "lucide-react";
+import { Bell, UserCircle2, LogOut, Clock  } from "lucide-react";
 import { ViewCommentModal } from "@/components/shared/ViewCommentModal";
 import api from '@/api';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -17,10 +17,18 @@ export function EmployeeDashboard() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [filteredNotifications, setFilteredNotifications] = useState<AppNotification[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<'all' | 'today'>('all');
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [punchStatus, setPunchStatus] = useState<PunchStatus>('punched-out');
   const navigate = useNavigate();
 
   // The user object from localStorage contains 'id' which is an alias for '_id' from the backend
   const user = JSON.parse(localStorage.getItem('user') || '{}');
+
+  // Effect for the live clock
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!user?.id) {
@@ -46,6 +54,19 @@ export function EmployeeDashboard() {
           toast.info("You have new messages. Please check your notifications!");
           // Set a flag in session storage to prevent the toast from showing again during this session
           sessionStorage.setItem('loginNotificationShown', 'true');
+        }
+
+        // Check initial punch status
+        const today = new Date().toISOString().slice(0, 10);
+        const todaysAttendance = attendanceRes.data.find((att: any) => att.date === today);
+        if (todaysAttendance) {
+          if (todaysAttendance.checkOut) {
+            setPunchStatus('completed');
+          } else {
+            setPunchStatus('punched-in');
+          }
+        } else {
+          setPunchStatus('punched-out');
         }
 
         // Construct the full employee object for the state
@@ -79,6 +100,29 @@ export function EmployeeDashboard() {
       }
     }
   }, [employee, notificationFilter]);
+
+  const handlePunchIn = async () => {
+    try {
+      const response = await api.post(`/employees/${user.id}/punch-in`);
+      setEmployee(prev => prev ? { ...prev, attendance: response.data } : null);
+      setPunchStatus('punched-in');
+      toast.success("Punched in successfully!");
+    } catch (error) {
+      toast.error("Failed to punch in.");
+    }
+  };
+  
+  const handlePunchOut = async () => {
+    try {
+      const response = await api.post(`/employees/${user.id}/punch-out`);
+      setEmployee(prev => prev ? { ...prev, attendance: response.data } : null);
+      setPunchStatus('completed');
+      toast.info("Punched out successfully!");
+    } catch (error) {
+      toast.error("Failed to punch out.");
+    }
+  };
+
 
   const handleLogout = () => {
     localStorage.removeItem('user');
@@ -127,7 +171,7 @@ export function EmployeeDashboard() {
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="ghost" size="icon" className="rounded-full">
-                <UserCircle2 className="h-6 w-6" />
+                <UserCircle2 className="h-16 w-16" />
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-64" align="end">
@@ -141,10 +185,35 @@ export function EmployeeDashboard() {
             </PopoverContent>
           </Popover>
           <Button variant="ghost" size="icon" onClick={handleLogout} className="rounded-full">
-            <LogOut className="h-6 w-6" />
+            <LogOut className="h-16 w-16" />
           </Button>
         </div>
       </div>
+
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center"><Clock className="mr-2 h-6 w-6" /> Mark Attendance</CardTitle>
+          <CardDescription>
+            {currentTime.toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col items-center space-y-4">
+          <div className="text-6xl font-bold font-mono">
+            {currentTime.toLocaleTimeString('en-US')}
+          </div>
+          {punchStatus === 'punched-out' && (
+            <Button size="lg" className="w-48" onClick={handlePunchIn}>Punch In</Button>
+          )}
+          {punchStatus === 'punched-in' && (
+            <Button size="lg" variant="destructive" className="w-48" onClick={handlePunchOut}>Punch Out</Button>
+          )}
+           {punchStatus === 'completed' && (
+            <p className="text-green-600 font-semibold">Attendance for today has been completed.</p>
+          )}
+        </CardContent>
+      </Card>
+
 
       <Tabs defaultValue="attendance">
         <TabsList>

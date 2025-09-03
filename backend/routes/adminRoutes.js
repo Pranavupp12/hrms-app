@@ -38,4 +38,11 @@ router.put('/:id/notifications/:notificationId', adminController.markNotificatio
 router.get('/salaries', adminController.getSalaryHistory);
 router.post('/salary', adminController.punchSalary);
 
+// Attendance Routes 
+router.get('/attendance/all', adminController.getAllAttendance);
+router.get('/attendance/today', adminController.getTodaysAttendance);
+router.get('/:id/attendance', adminController.getAdminAttendance);
+router.post('/:id/punch-in', adminController.adminPunchIn);
+router.post('/:id/punch-out', adminController.adminPunchOut);
+
 module.exports = router;

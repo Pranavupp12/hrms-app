@@ -75,3 +75,57 @@ exports.markNotificationAsRead = async (req, res) => {
         res.status(500).json({ message: 'Error updating notification' });
     }
 };
+
+exports.punchIn = async (req, res) => {
+    try {
+        const employee = await Employee.findById(req.params.id);
+        if (!employee) return res.status(404).json({ message: 'Employee not found' });
+
+        const today = new Date().toISOString().slice(0, 10);
+        const alreadyPunchedIn = employee.attendance.some(att => att.date === today);
+
+        if (alreadyPunchedIn) {
+            return res.status(400).json({ message: 'Already punched in for today' });
+        }
+
+        const newAttendance = {
+            date: today,
+            checkIn: new Date().toLocaleTimeString('en-IN', { hour12: false }),
+            checkOut: '',
+            status: 'Present'
+        };
+
+        employee.attendance.push(newAttendance);
+        await employee.save();
+        res.status(201).json(employee.attendance);
+
+    } catch (error) {
+        res.status(500).json({ message: 'Error punching in' });
+    }
+};
+
+
+exports.punchOut = async (req, res) => {
+    try {
+        const employee = await Employee.findById(req.params.id);
+        if (!employee) return res.status(404).json({ message: 'Employee not found' });
+
+        const today = new Date().toISOString().slice(0, 10);
+        const attendanceRecord = employee.attendance.find(att => att.date === today);
+
+        if (!attendanceRecord) {
+            return res.status(400).json({ message: 'Cannot punch out without punching in first' });
+        }
+
+        if (attendanceRecord.checkOut) {
+            return res.status(400).json({ message: 'Already punched out for today' });
+        }
+
+        attendanceRecord.checkOut = new Date().toLocaleTimeString('en-IN', { hour12: false });
+        await employee.save();
+        res.status(200).json(employee.attendance);
+
+    } catch (error) {
+        res.status(500).json({ message: 'Error punching out' });
+    }
+};

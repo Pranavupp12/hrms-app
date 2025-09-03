@@ -217,3 +217,125 @@ exports.punchSalary = async (req, res) => {
         res.status(500).json({ message: 'Error punching salary' });
     }
 };
+
+
+// Get all attendance records for ALL users (Employees and Admins)
+exports.getAllAttendance = async (req, res) => {
+    try {
+        const users = await Employee.find({}).select('name attendance role');
+        const allAttendance = users.flatMap(user => 
+            user.attendance.map(att => ({
+                employeeName: user.name,
+                role: user.role,
+                ...att.toObject()
+            }))
+        );
+        res.json(allAttendance.sort((a, b) => new Date(b.date) - new Date(a.date)));
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching attendance records' });
+    }
+};
+
+// Get personal attendance for the logged-in admin
+exports.getAdminAttendance = async (req, res) => {
+    try {
+        const admin = await Employee.findById(req.params.id).select('attendance');
+        if (!admin) return res.status(404).json({ message: 'Admin not found' });
+        res.json(admin.attendance);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching admin attendance' });
+    }
+};
+
+// Punch In for Admin
+exports.adminPunchIn = async (req, res) => {
+    try {
+        const admin = await Employee.findById(req.params.id);
+        if (!admin) return res.status(404).json({ message: 'Admin not found' });
+
+        const today = new Date().toISOString().slice(0, 10);
+        const alreadyPunchedIn = admin.attendance.some(att => att.date === today);
+
+        if (alreadyPunchedIn) {
+            return res.status(400).json({ message: 'Already punched in for today' });
+        }
+
+        const newAttendance = {
+            date: today,
+            checkIn: new Date().toLocaleTimeString('en-IN', { hour12: false }),
+            checkOut: '',
+            status: 'Present'
+        };
+
+        admin.attendance.push(newAttendance);
+        await admin.save();
+        res.status(201).json(admin.attendance);
+
+    } catch (error) {
+        res.status(500).json({ message: 'Error punching in' });
+    }
+};
+
+// Punch Out for Admin
+exports.adminPunchOut = async (req, res) => {
+    try {
+        const admin = await Employee.findById(req.params.id);
+        if (!admin) return res.status(404).json({ message: 'Admin not found' });
+
+        const today = new Date().toISOString().slice(0, 10);
+        const attendanceRecord = admin.attendance.find(att => att.date === today);
+
+        if (!attendanceRecord) {
+            return res.status(400).json({ message: 'Cannot punch out without punching in first' });
+        }
+
+        if (attendanceRecord.checkOut) {
+            return res.status(400).json({ message: 'Already punched out for today' });
+        }
+
+        attendanceRecord.checkOut = new Date().toLocaleTimeString('en-IN', { hour12: false });
+        await admin.save();
+        res.status(200).json(admin.attendance);
+
+    } catch (error) {
+        res.status(500).json({ message: 'Error punching out' });
+    }
+};
+
+// Get a complete attendance status for all users for today
+exports.getTodaysAttendance = async (req, res) => {
+    try {
+        const allUsers = await Employee.find({}).select('name role attendance');
+        const today = new Date().toISOString().slice(0, 10);
+
+        const todaysStatus = allUsers.map(user => {
+            const attendanceRecord = user.attendance.find(att => att.date === today);
+
+            if (attendanceRecord) {
+                // User has an attendance record for today
+                return {
+                    employeeName: user.name,
+                    role: user.role,
+                    date: today,
+                    checkIn: attendanceRecord.checkIn,
+                    checkOut: attendanceRecord.checkOut,
+                    status: attendanceRecord.checkOut ? 'Present' : 'Punched In'
+                };
+            } else {
+                // User has NOT punched in yet today
+                return {
+                    employeeName: user.name,
+                    role: user.role,
+                    date: today,
+                    checkIn: '--',
+                    checkOut: '--',
+                    status: 'Not Punched In'
+                };
+            }
+        });
+
+        res.json(todaysStatus);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching today\'s attendance status' });
+    }
+};

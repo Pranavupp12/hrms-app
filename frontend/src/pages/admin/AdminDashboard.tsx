@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -22,64 +22,93 @@ import type {
   SentNotification,
   LeaveRequest,
   AppNotification,
+  Attendance,
+  AllUserAttendance,
+  PunchStatus
 } from "@/types";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../../api";
-import { Bell, UserCircle2, LogOut } from "lucide-react";
+import { Bell, UserCircle2, LogOut, Clock } from "lucide-react";
 
 export function AdminDashboard() {
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
-  const [leaveRequests, setLeaveRequests] = useState<
-    (LeaveRequest & { employeeName: string; id: string })[]
-  >([]);
-  const [salaryHistory, setSalaryHistory] = useState<
-    (Salary & { employeeName: string; id: string })[]
-  >([]);
-  const [sentNotifications, setSentNotifications] = useState<
-    SentNotification[]
-  >([]);
-  const [adminNotifications, setAdminNotifications] = useState<AppNotification[]>(
-    []
-  );
-
+  const [leaveRequests, setLeaveRequests] = useState<(LeaveRequest & { employeeName: string; id: string })[]>([]);
+  const [salaryHistory, setSalaryHistory] = useState<(Salary & { employeeName: string; id: string })[]>([]);
+  const [sentNotifications, setSentNotifications] = useState<SentNotification[]>([]);
+  const [adminNotifications, setAdminNotifications] = useState<AppNotification[]>([]);
+  const [adminAttendance, setAdminAttendance] = useState<Attendance[]>([]);
+  const [allUserAttendance, setAllUserAttendance] = useState<AllUserAttendance[]>([]);
+  
   const [filteredAdminNotifications, setFilteredAdminNotifications] = useState<AppNotification[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<'all' | 'today'>('all');
+  const [allAttendanceFilter, setAllAttendanceFilter] = useState<'today' | 'all'>('today');
+
   const [notificationMessage, setNotificationMessage] = useState("");
   const [notificationRecipient, setNotificationRecipient] = useState("all");
   const [salaryEmployeeId, setSalaryEmployeeId] = useState("");
   const [salaryAmount, setSalaryAmount] = useState<number | "">("");
   const [salaryMonth, setSalaryMonth] = useState("");
 
-  // State for the employee modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [isViewMode, setIsViewMode] = useState(false);
 
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [adminPunchStatus, setAdminPunchStatus] = useState<PunchStatus>('punched-out');
+
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const fetchData = async () => {
     try {
+      const attendanceEndpoint = allAttendanceFilter === 'today' 
+        ? '/admin/attendance/today' 
+        : '/admin/attendance/all';
+
       const [
         employeesRes,
         leavesRes,
         salariesRes,
         sentNotificationsRes,
         adminNotificationsRes,
+        adminAttendanceRes,
+        allAttendanceRes,
       ] = await Promise.all([
         api.get("/admin/employees"),
         api.get("/admin/leave-requests"),
         api.get("/admin/salaries"),
         api.get("/admin/notifications"),
         api.get(`/admin/${user.id}/notifications`),
+        api.get(`/admin/${user.id}/attendance`),
+        api.get(attendanceEndpoint),
       ]);
+
       setAllEmployees(employeesRes.data);
       setLeaveRequests(leavesRes.data);
       setSalaryHistory(salariesRes.data);
       setSentNotifications(sentNotificationsRes.data);
       setAdminNotifications(adminNotificationsRes.data);
+      setAdminAttendance(adminAttendanceRes.data);
+      setAllUserAttendance(allAttendanceRes.data);
+
+      const today = new Date().toISOString().slice(0, 10);
+      const myTodaysAttendance = adminAttendanceRes.data.find((att: any) => att.date === today);
+      if (myTodaysAttendance) {
+        if (myTodaysAttendance.checkOut) {
+          setAdminPunchStatus('completed');
+        } else {
+          setAdminPunchStatus('punched-in');
+        }
+      } else {
+        setAdminPunchStatus('punched-out');
+      }
 
       const unreadNotifications = adminNotificationsRes.data.some(
         (n: any) => n.status === "unread"
@@ -93,8 +122,7 @@ export function AdminDashboard() {
         sessionStorage.setItem("loginNotificationShown", "true");
       }
     } catch (error) {
-      toast.error("Failed to fetch data.");
-      console.error(error);
+      toast.error("Failed to fetch dashboard data.");
     }
   };
 
@@ -104,7 +132,7 @@ export function AdminDashboard() {
       return;
     }
     fetchData();
-  }, [user.id, navigate]);
+  }, [user.id, navigate, allAttendanceFilter]);
 
   useEffect(() => {
     if (notificationFilter === 'today') {
@@ -114,6 +142,28 @@ export function AdminDashboard() {
       setFilteredAdminNotifications(adminNotifications);
     }
   }, [adminNotifications, notificationFilter]);
+
+  const handleAdminPunchIn = async () => {
+    try {
+      await api.post(`/admin/${user.id}/punch-in`);
+      setAdminPunchStatus('punched-in');
+      toast.success("Punched in successfully!");
+      fetchData();
+    } catch (error) {
+      toast.error("Failed to punch in.");
+    }
+  };
+  
+  const handleAdminPunchOut = async () => {
+    try {
+      await api.post(`/admin/${user.id}/punch-out`);
+      setAdminPunchStatus('completed');
+      toast.info("Punched out successfully!");
+      fetchData();
+    } catch (error) {
+      toast.error("Failed to punch out.");
+    }
+  };
 
   const openAddModal = () => {
     setEditingEmployee(null);
@@ -255,14 +305,13 @@ export function AdminDashboard() {
         employee={editingEmployee}
         viewMode={isViewMode}
       />
-
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold">Welcome Admin, {user.name}!</h1>
-         <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2">
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="ghost" size="icon" className="rounded-full">
-                <UserCircle2 className="h-8 w-8" />
+                <UserCircle2 size={28} />
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-64" align="end">
@@ -276,18 +325,179 @@ export function AdminDashboard() {
             </PopoverContent>
           </Popover>
           <Button variant="ghost" size="icon" onClick={handleLogout} className="rounded-full">
-            <LogOut className="h-8 w-8" />
+            <LogOut size={28} />
           </Button>
         </div>
       </div>
-
-      <Tabs defaultValue="leave-requests">
+      <Tabs defaultValue="attendance">
         <TabsList>
+          <TabsTrigger value="attendance">Attendance</TabsTrigger>
           <TabsTrigger value="leave-requests">Leave Requests</TabsTrigger>
           <TabsTrigger value="employees">Employee Management</TabsTrigger>
           <TabsTrigger value="notifications">Send Notification</TabsTrigger>
           <TabsTrigger value="salary-punch">Salary Punch In</TabsTrigger>
         </TabsList>
+        <TabsContent value="attendance" className="mt-4 space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center">
+                <Clock className="mr-2 h-6 w-6" /> Mark Your Attendance
+              </CardTitle>
+              <CardDescription>
+                {currentTime.toLocaleDateString("en-GB", {
+                  weekday: "long",
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                })}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col items-center space-y-4">
+              <div className="text-6xl font-bold font-mono">
+                {currentTime.toLocaleTimeString("en-US")}
+              </div>
+              {adminPunchStatus === "punched-out" && (
+                <Button
+                  size="lg"
+                  className="w-48"
+                  onClick={handleAdminPunchIn}
+                >
+                  Punch In
+                </Button>
+              )}
+              {adminPunchStatus === "punched-in" && (
+                <Button
+                  size="lg"
+                  variant="destructive"
+                  className="w-48"
+                  onClick={handleAdminPunchOut}
+                >
+                  Punch Out
+                </Button>
+              )}
+              {adminPunchStatus === "completed" && (
+                <p className="text-green-600 font-semibold">
+                  Your attendance for today has been completed.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>My Attendance Record</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Check-In</TableHead>
+                    <TableHead>Check-Out</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {adminAttendance.map((att) => (
+                    <TableRow key={`my-att-${att.date}`}>
+                      <TableCell>{att.date}</TableCell>
+                      <TableCell>{att.checkIn || "--"}</TableCell>
+                      <TableCell>{att.checkOut || "--"}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            att.status === "Present"
+                              ? "default"
+                              : "destructive"
+                          }
+                        >
+                          {att.status}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle>All User Attendance</CardTitle>
+                <div className="space-x-2">
+                  <Button
+                    size="sm"
+                    variant={
+                      allAttendanceFilter === "all" ? "default" : "outline"
+                    }
+                    onClick={() => setAllAttendanceFilter("all")}
+                  >
+                    All
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={
+                      allAttendanceFilter === "today" ? "default" : "outline"
+                    }
+                    onClick={() => setAllAttendanceFilter("today")}
+                  >
+                    Today
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Check-In</TableHead>
+                    <TableHead>Check-Out</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allUserAttendance.map((att, index) => (
+                    <TableRow
+                      key={`${att.employeeName}-${att.date}-${index}`}
+                    >
+                      <TableCell>{att.employeeName}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{att.role}</Badge>
+                      </TableCell>
+                      <TableCell>{att.date}</TableCell>
+                      <TableCell>{att.checkIn || "--"}</TableCell>
+                      <TableCell>{att.checkOut || "--"}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            att.status === "Present"
+                              ? "default"
+                              : att.status === "Punched In"
+                              ? "default"
+                              : att.status === "Absent"
+                              ? "destructive"
+                              : "outline"
+                          }
+                          className={
+                            att.status === "Punched In"
+                              ? "bg-yellow-500 text-black"
+                              : att.status === "Not Punched In"
+                              ? "bg-gray-200 text-gray-700"
+                              : ""
+                          }
+                        >
+                          {att.status}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         <TabsContent value="leave-requests" className="mt-4">
           <Card>
