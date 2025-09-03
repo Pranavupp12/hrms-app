@@ -11,7 +11,7 @@ export interface LeaveRequest {
   rejectionReason?: string;
 }
 
-export interface Notification {
+export interface AppNotification {
   _id: string;
   message: string;
   date: string;
@@ -43,7 +43,7 @@ export interface Employee {
   attendance: Attendance[];
   salaryHistory: Salary[];
   leaveRequests: LeaveRequest[];
-  notifications: Notification[]; 
+  notifications: AppNotification[]; 
 }
 
 export interface SentNotification {

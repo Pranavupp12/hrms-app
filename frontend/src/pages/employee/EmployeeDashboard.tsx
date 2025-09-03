@@ -3,17 +3,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { Employee, LeaveRequest } from "@/types";
+import type { Employee, LeaveRequest, AppNotification } from "@/types";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ApplyLeaveModal } from "@/components/shared/ApplyLeaveModal";
-import { Bell } from "lucide-react";
+import { Bell, UserCircle2, LogOut  } from "lucide-react";
 import { ViewCommentModal } from "@/components/shared/ViewCommentModal";
 import api from '@/api';
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 export function EmployeeDashboard() {
   const [employee, setEmployee] = useState<Employee | null>(null);
+  const [filteredNotifications, setFilteredNotifications] = useState<AppNotification[]>([]);
+  const [notificationFilter, setNotificationFilter] = useState<'all' | 'today'>('all');
   const navigate = useNavigate();
 
   // The user object from localStorage contains 'id' which is an alias for '_id' from the backend
@@ -66,10 +69,21 @@ export function EmployeeDashboard() {
     fetchEmployeeData();
   }, [user.id, navigate]);
 
+  useEffect(() => {
+    if (employee?.notifications) {
+      if (notificationFilter === 'today') {
+        const today = new Date().toISOString().slice(0, 10);
+        setFilteredNotifications(employee.notifications.filter(n => n.date === today));
+      } else {
+        setFilteredNotifications(employee.notifications);
+      }
+    }
+  }, [employee, notificationFilter]);
+
   const handleLogout = () => {
     localStorage.removeItem('user');
-     // Clear the session storage flag on logout
-    sessionStorage.removeItem('loginNotificationShown'); 
+    // Clear the session storage flag on logout
+    sessionStorage.removeItem('loginNotificationShown');
     toast.success("You have been logged out.");
     navigate('/login');
   };
@@ -89,15 +103,15 @@ export function EmployeeDashboard() {
 
   const handleMarkAsRead = async (notificationId: string) => {
     try {
-        await api.put(`/employees/${user.id}/notifications/${notificationId}`);
-        setEmployee(prev => prev ? {
-            ...prev,
-            // Update the status of the correct notification using `_id`
-            notifications: prev.notifications.map(n => n._id === notificationId ? { ...n, status: 'read' } : n)
-        } : null);
-        toast.info("Notification marked as read.");
+      await api.put(`/employees/${user.id}/notifications/${notificationId}`);
+      setEmployee(prev => prev ? {
+        ...prev,
+        // Update the status of the correct notification using `_id`
+        notifications: prev.notifications.map(n => n._id === notificationId ? { ...n, status: 'read' } : n)
+      } : null);
+      toast.info("Notification marked as read.");
     } catch (error) {
-        toast.error("Failed to mark notification as read.");
+      toast.error("Failed to mark notification as read.");
     }
   };
 
@@ -109,7 +123,27 @@ export function EmployeeDashboard() {
     <div className="p-8 space-y-8">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Welcome, {employee.name}!</h1>
-        <Button variant="outline" onClick={handleLogout}>Logout</Button>
+        <div className="flex items-center space-x-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="icon" className="rounded-full">
+                <UserCircle2 className="h-6 w-6" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64" align="end">
+              <div className="grid gap-2 text-sm p-2">
+                <div className="font-bold">{user.name}</div>
+                <div className="text-muted-foreground">{user.email}</div>
+                <div className="mt-2">
+                  <Badge>{user.role}</Badge>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+          <Button variant="ghost" size="icon" onClick={handleLogout} className="rounded-full">
+            <LogOut className="h-6 w-6" />
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="attendance">
@@ -152,7 +186,7 @@ export function EmployeeDashboard() {
           <Card>
             <CardHeader><CardTitle>My Salary History</CardTitle></CardHeader>
             <CardContent>
-               <Table>
+              <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Month</TableHead>
@@ -218,14 +252,20 @@ export function EmployeeDashboard() {
         <TabsContent value="notifications" className="mt-4">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center">
-                <Bell className="mr-2 h-5 w-5" /> My Notifications
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center">
+                  <Bell className="mr-2 h-5 w-5" /> My Notifications
+                </CardTitle>
+                <div className="space-x-2">
+                  <Button size="sm" variant={notificationFilter === 'all' ? 'default' : 'outline'} onClick={() => setNotificationFilter('all')}>All</Button>
+                  <Button size="sm" variant={notificationFilter === 'today' ? 'default' : 'outline'} onClick={() => setNotificationFilter('today')}>Today</Button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {employee.notifications.length > 0 ? (
-                  employee.notifications.map(notification => (
+                {filteredNotifications.length > 0 ? (
+                  filteredNotifications.map(notification => (
                     <div key={notification._id} className="flex items-start justify-between p-4 rounded-lg border">
                       <div className="flex items-start space-x-4">
                         <span className={`mt-1.5 h-2 w-2 rounded-full ${notification.status === 'unread' ? 'bg-blue-500' : 'bg-gray-300'}`} />
@@ -242,7 +282,7 @@ export function EmployeeDashboard() {
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-muted-foreground text-center">You have no new notifications.</p>
+                  <p className="text-sm text-muted-foreground text-center">You have no new notifications for this period.</p>
                 )}
               </div>
             </CardContent>

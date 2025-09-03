@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Table,
   TableBody,
@@ -20,13 +21,13 @@ import type {
   Salary,
   SentNotification,
   LeaveRequest,
-  Notification,
+  AppNotification,
 } from "@/types";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../../api";
-import { Bell } from "lucide-react";
+import { Bell, UserCircle2, LogOut } from "lucide-react";
 
 export function AdminDashboard() {
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
@@ -39,10 +40,12 @@ export function AdminDashboard() {
   const [sentNotifications, setSentNotifications] = useState<
     SentNotification[]
   >([]);
-  const [adminNotifications, setAdminNotifications] = useState<Notification[]>(
+  const [adminNotifications, setAdminNotifications] = useState<AppNotification[]>(
     []
   );
 
+  const [filteredAdminNotifications, setFilteredAdminNotifications] = useState<AppNotification[]>([]);
+  const [notificationFilter, setNotificationFilter] = useState<'all' | 'today'>('all');
   const [notificationMessage, setNotificationMessage] = useState("");
   const [notificationRecipient, setNotificationRecipient] = useState("all");
   const [salaryEmployeeId, setSalaryEmployeeId] = useState("");
@@ -102,6 +105,15 @@ export function AdminDashboard() {
     }
     fetchData();
   }, [user.id, navigate]);
+
+  useEffect(() => {
+    if (notificationFilter === 'today') {
+      const today = new Date().toISOString().slice(0, 10);
+      setFilteredAdminNotifications(adminNotifications.filter(n => n.date === today));
+    } else {
+      setFilteredAdminNotifications(adminNotifications);
+    }
+  }, [adminNotifications, notificationFilter]);
 
   const openAddModal = () => {
     setEditingEmployee(null);
@@ -246,9 +258,27 @@ export function AdminDashboard() {
 
       <div className="flex items-center justify-between mb-8">
         <h1 className="text-3xl font-bold">Welcome Admin, {user.name}!</h1>
-        <Button variant="outline" onClick={handleLogout}>
-          Logout
-        </Button>
+         <div className="flex items-center space-x-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="icon" className="rounded-full">
+                <UserCircle2 className="h-8 w-8" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64" align="end">
+              <div className="grid gap-2 text-sm p-2">
+                <div className="font-bold">{user.name}</div>
+                <div className="text-muted-foreground">{user.email}</div>
+                <div className="mt-2">
+                  <Badge>{user.role}</Badge>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
+          <Button variant="ghost" size="icon" onClick={handleLogout} className="rounded-full">
+            <LogOut className="h-8 w-8" />
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="leave-requests">
@@ -441,16 +471,22 @@ export function AdminDashboard() {
             </CardContent>
           </Card>
 
-          <Card>
+           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center">
-                <Bell className="mr-2 h-5 w-5" /> My Notifications
-              </CardTitle>
+               <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center">
+                  <Bell className="mr-2 h-5 w-5" /> My Notifications
+                </CardTitle>
+                <div className="space-x-2">
+                  <Button size="sm" variant={notificationFilter === 'all' ? 'default' : 'outline'} onClick={() => setNotificationFilter('all')}>All</Button>
+                  <Button size="sm" variant={notificationFilter === 'today' ? 'default' : 'outline'} onClick={() => setNotificationFilter('today')}>Today</Button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {adminNotifications.length > 0 ? (
-                  adminNotifications.map((notification) => (
+                {filteredAdminNotifications.length > 0 ? (
+                  filteredAdminNotifications.map((notification) => (
                     <div
                       key={notification._id}
                       className="flex items-start justify-between p-4 rounded-lg border"
@@ -491,7 +527,7 @@ export function AdminDashboard() {
                   ))
                 ) : (
                   <p className="text-sm text-muted-foreground text-center">
-                    You have no new notifications.
+                    You have no new notifications for this period.
                   </p>
                 )}
               </div>
