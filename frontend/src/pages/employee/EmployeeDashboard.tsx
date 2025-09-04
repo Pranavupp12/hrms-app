@@ -13,6 +13,34 @@ import { ViewCommentModal } from "@/components/shared/ViewCommentModal";
 import api from '@/api';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
+
+// Helper to format date from YYYY-MM-DD to DD/MM/YYYY
+const formatDate = (dateString?: string) => {
+  if (!dateString || dateString === '--') return 'N/A';
+  try {
+    const [year, month, day] = dateString.split('-');
+    return `${day}/${month}/${year}`;
+  } catch (error) {
+    return dateString;
+  }
+};
+
+// Helper to format time from 24-hour to 12-hour AM/PM
+const formatTime = (timeString?: string) => {
+  if (!timeString || timeString === '--') return '--';
+  try {
+    const [hours, minutes] = timeString.split(':');
+    let h = parseInt(hours, 10);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    h = h || 12;
+    const hStr = h < 10 ? '0' + h : h.toString();
+    return `${hStr}:${minutes} ${ampm}`;
+  } catch (error) {
+    return timeString;
+  }
+};
+
 export function EmployeeDashboard() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [filteredNotifications, setFilteredNotifications] = useState<AppNotification[]>([]);
@@ -239,9 +267,9 @@ export function EmployeeDashboard() {
                 <TableBody>
                   {employee.attendance.map((att) => (
                     <TableRow key={att.date}>
-                      <TableCell>{att.date}</TableCell>
-                      <TableCell>{att.checkIn}</TableCell>
-                      <TableCell>{att.checkOut}</TableCell>
+                      <TableCell>{formatDate(att.date)}</TableCell>
+                      <TableCell>{formatTime(att.checkIn)}</TableCell>
+                      <TableCell>{formatTime(att.checkOut)}</TableCell>
                       <TableCell><Badge variant={att.status === 'Present' ? 'default' : 'destructive'}>{att.status}</Badge></TableCell>
                     </TableRow>
                   ))}
@@ -261,6 +289,7 @@ export function EmployeeDashboard() {
                     <TableHead>Month</TableHead>
                     <TableHead>Amount</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Date Punched</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -268,7 +297,8 @@ export function EmployeeDashboard() {
                     <TableRow key={sal.month}>
                       <TableCell>{sal.month}</TableCell>
                       <TableCell>₹{sal.amount.toLocaleString()}</TableCell>
-                      <TableCell><Badge variant={sal.status === 'Paid' ? 'secondary' : 'outline'}>{sal.status}</Badge></TableCell>
+                      <TableCell><Badge>{sal.status}</Badge></TableCell>
+                      <TableCell>{formatDate(sal.date)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -300,8 +330,8 @@ export function EmployeeDashboard() {
                   {employee.leaveRequests.map((req) => (
                     <TableRow key={req._id}>
                       <TableCell>{req.type}</TableCell>
-                      <TableCell>{req.startDate}</TableCell>
-                      <TableCell>{req.endDate}</TableCell>
+                      <TableCell>{formatDate(req.startDate)}</TableCell>
+                      <TableCell>{formatDate(req.endDate)}</TableCell>
                       <TableCell><Badge>{req.status}</Badge></TableCell>
                       <TableCell>
                         {req.status === 'Rejected' && req.rejectionReason && (
@@ -340,7 +370,12 @@ export function EmployeeDashboard() {
                         <span className={`mt-1.5 h-2 w-2 rounded-full ${notification.status === 'unread' ? 'bg-blue-500' : 'bg-gray-300'}`} />
                         <div className="flex flex-col">
                           <p className={`text-sm ${notification.status === 'unread' ? 'font-semibold text-primary' : 'text-muted-foreground'}`}>{notification.message}</p>
-                          <p className="text-xs text-muted-foreground mt-1">{notification.date}</p>
+                          <p className="text-xs text-muted-foreground mt-1">{formatDate(notification.date)}</p>
+                           {notification.sentBy && (
+                            <p className="text-xs font-semibold text-muted-foreground mt-1">
+                              - {notification.sentBy.name} ({notification.sentBy.role})
+                            </p>
+                          )}
                         </div>
                       </div>
                       {notification.status === 'unread' && (

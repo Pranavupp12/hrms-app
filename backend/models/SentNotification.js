@@ -5,6 +5,8 @@ const sentNotificationSchema = new Schema({
   date: { type: String, required: true },
   message: { type: String, required: true },
   recipient: { type: String, required: true }, // "All Employees" or an employee's name
+  sentBy: { type: Schema.Types.ObjectId, ref: 'Employee' },
+  sentAt: { type: Date, default: Date.now }
 });
 
 module.exports = mongoose.model('SentNotification', sentNotificationSchema);

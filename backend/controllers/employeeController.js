@@ -49,7 +49,7 @@ exports.applyForLeave = async (req, res) => {
 // Get notifications for an employee
 exports.getNotifications = async (req, res) => {
     try {
-        const employee = await Employee.findById(req.params.id);
+        const employee = await Employee.findById(req.params.id).populate('notifications.sentBy', 'name role');
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
         res.json(employee.notifications);
     } catch (error) {

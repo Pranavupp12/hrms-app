@@ -37,6 +37,7 @@ router.put('/:id/notifications/:notificationId', adminController.markNotificatio
 // Salary Management
 router.get('/salaries', adminController.getSalaryHistory);
 router.post('/salary', adminController.punchSalary);
+router.get('/:id/salaries', adminController.getAdminSalaryHistory); 
 
 // Attendance Routes 
 router.get('/attendance/all', adminController.getAllAttendance);

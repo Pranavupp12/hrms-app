@@ -114,7 +114,7 @@ exports.rejectLeaveRequest = async (req, res) => {
 // Get notifications for the logged-in admin
 exports.getAdminNotifications = async (req, res) => {
     try {
-        const admin = await Employee.findById(req.params.id);
+        const admin = await Employee.findById(req.params.id).populate('notifications.sentBy', 'name role');
         if (!admin) return res.status(404).json({ message: 'Admin not found' });
         res.json(admin.notifications);
     } catch (error) {
@@ -144,44 +144,55 @@ exports.markNotificationAsRead = async (req, res) => {
 // Fetch sent notifications history
 exports.getSentNotifications = async (req, res) => {
     try {
-        const notifications = await SentNotification.find();
+        const notifications = await SentNotification.find().populate('sentBy', 'name role');
         res.json(notifications);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching sent notifications' });
     }
 };
 
-// Send a notification - CORRECTED LOGIC
+// Send a notification 
 exports.sendNotification = async (req, res) => {
-    const { recipient, message } = req.body;
+    const { recipient, message, senderId } = req.body; // Add senderId
     const newNotification = {
         message,
         date: new Date().toISOString().slice(0, 10),
-        status: 'unread'
+        status: 'unread',
+        sentBy: senderId // Associate the notification with the sender
     };
 
     try {
-        let recipientName = 'All Employees';
+        let recipientNames = [];
 
         if (recipient === 'all') {
             await Employee.updateMany({}, { $push: { notifications: newNotification } });
+            recipientNames.push('All Employees');
+        } else if (Array.isArray(recipient) && recipient.length > 0) {
+            const areIdsValid = recipient.every(id => mongoose.Types.ObjectId.isValid(id));
+            if (!areIdsValid) {
+                return res.status(400).json({ message: 'Invalid recipient ID provided.' });
+            }
+
+            const employees = await Employee.find({ '_id': { $in: recipient } }).select('name');
+            if (employees.length !== recipient.length) {
+                return res.status(404).json({ message: 'One or more recipient employees not found.' });
+            }
+
+            await Employee.updateMany(
+                { '_id': { $in: recipient } },
+                { $push: { notifications: newNotification } }
+            );
+            recipientNames = employees.map(emp => emp.name);
+
         } else {
-            // Validate if the recipient is a valid ObjectId before querying
-            if (!mongoose.Types.ObjectId.isValid(recipient)) {
-                return res.status(400).json({ message: 'Invalid recipient ID.' });
-            }
-            const employee = await Employee.findByIdAndUpdate(recipient, { $push: { notifications: newNotification } });
-            if (employee) {
-                recipientName = employee.name;
-            } else {
-                return res.status(404).json({ message: 'Recipient employee not found.' });
-            }
+            return res.status(400).json({ message: 'A recipient is required.' });
         }
 
         const sentNotification = new SentNotification({
             date: newNotification.date,
             message,
-            recipient: recipientName,
+            recipient: recipientNames.join(', '),
+            sentBy: senderId // Save the sender's ID
         });
 
         await sentNotification.save();
@@ -337,5 +348,16 @@ exports.getTodaysAttendance = async (req, res) => {
         res.json(todaysStatus);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching today\'s attendance status' });
+    }
+};
+
+// Get personal salary history for the logged-in Admin
+exports.getAdminSalaryHistory = async (req, res) => {
+    try {
+        const admin = await Employee.findById(req.params.id).select('salaryHistory');
+        if (!admin) return res.status(404).json({ message: 'Admin not found' });
+        res.json(admin.salaryHistory);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching admin salary history' });
     }
 };

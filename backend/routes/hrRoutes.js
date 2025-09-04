@@ -34,4 +34,8 @@ router.get('/:id/attendance', hrController.getHrAttendance);
 router.post('/:id/punch-in', hrController.hrPunchIn);
 router.post('/:id/punch-out', hrController.hrPunchOut);
 
+// Salary History
+router.get('/:id/salaries', hrController.getHrSalaryHistory);
+
+
 module.exports = router;

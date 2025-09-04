@@ -37,7 +37,7 @@ exports.addEmployee = async (req, res) => {
 // Get notifications for the logged-in HR
 exports.getHrNotifications = async (req, res) => {
     try {
-        const hr = await Employee.findById(req.params.id);
+        const hr = await Employee.findById(req.params.id).populate('notifications.sentBy', 'name role');
         if (!hr) return res.status(404).json({ message: 'HR not found' });
         res.json(hr.notifications);
     } catch (error) {
@@ -67,7 +67,7 @@ exports.markNotificationAsRead = async (req, res) => {
 // Fetch sent notifications history
 exports.getSentNotifications = async (req, res) => {
     try {
-        const notifications = await SentNotification.find();
+        const notifications = await SentNotification.find().populate('sentBy', 'name role');
         res.json(notifications);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching sent notifications' });
@@ -76,34 +76,46 @@ exports.getSentNotifications = async (req, res) => {
 
 // Send a notification
 exports.sendNotification = async (req, res) => {
-    const { recipient, message } = req.body;
+    const { recipient, message, senderId } = req.body; // Add senderId
     const newNotification = {
         message,
         date: new Date().toISOString().slice(0, 10),
-        status: 'unread'
+        status: 'unread',
+        sentBy: senderId 
     };
 
     try {
-        let recipientName = 'All Employees';
+        let recipientNames = [];
 
         if (recipient === 'all') {
             await Employee.updateMany({}, { $push: { notifications: newNotification } });
+            recipientNames.push('All Employees');
+        } else if (Array.isArray(recipient) && recipient.length > 0) {
+            const areIdsValid = recipient.every(id => mongoose.Types.ObjectId.isValid(id));
+            if (!areIdsValid) {
+                return res.status(400).json({ message: 'Invalid recipient ID provided.' });
+            }
+
+            const employees = await Employee.find({ '_id': { $in: recipient } }).select('name');
+            if (employees.length !== recipient.length) {
+                return res.status(404).json({ message: 'One or more recipient employees not found.' });
+            }
+
+            await Employee.updateMany(
+                { '_id': { $in: recipient } },
+                { $push: { notifications: newNotification } }
+            );
+            recipientNames = employees.map(emp => emp.name);
+
         } else {
-            if (!mongoose.Types.ObjectId.isValid(recipient)) {
-                return res.status(400).json({ message: 'Invalid recipient ID.' });
-            }
-            const employee = await Employee.findByIdAndUpdate(recipient, { $push: { notifications: newNotification } });
-            if (employee) {
-                recipientName = employee.name;
-            } else {
-                return res.status(404).json({ message: 'Recipient employee not found.' });
-            }
+            return res.status(400).json({ message: 'A recipient is required.' });
         }
 
         const sentNotification = new SentNotification({
             date: newNotification.date,
             message,
-            recipient: recipientName,
+            recipient: recipientNames.join(', '),
+            sentBy: senderId // Save the sender's ID
         });
 
         await sentNotification.save();
@@ -230,5 +242,16 @@ exports.getTodaysAttendance = async (req, res) => {
         res.json(todaysStatus);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching today\'s attendance status' });
+    }
+};
+
+// Get personal salary history for the logged-in HR
+exports.getHrSalaryHistory = async (req, res) => {
+    try {
+        const hr = await Employee.findById(req.params.id).select('salaryHistory');
+        if (!hr) return res.status(404).json({ message: 'HR not found' });
+        res.json(hr.salaryHistory);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching HR salary history' });
     }
 };

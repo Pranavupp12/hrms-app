@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { EmployeeModal } from "../../components/shared/EmployeeModal";
 import { RejectLeaveModal } from "../../components/shared/RejectLeaveModal";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import type {
   Employee,
   Salary,
@@ -30,7 +31,58 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../../api";
-import { Bell, UserCircle2, LogOut, Clock } from "lucide-react";
+import { Bell, UserCircle2, LogOut, Clock, ChevronsUpDown } from "lucide-react";
+
+
+// Helper to format date from YYYY-MM-DD to DD/MM/YYYY
+const formatDate = (dateString?: string) => {
+  if (!dateString || dateString === '--') return '--';
+  try {
+    const [year, month, day] = dateString.split('-');
+    return `${day}/${month}/${year}`;
+  } catch (error) {
+    return dateString;
+  }
+};
+
+// Helper to format time from 24-hour to 12-hour AM/PM
+const formatTime = (timeString?: string) => {
+  if (!timeString || timeString === '--') return '--';
+  try {
+    const [hours, minutes] = timeString.split(':');
+    let h = parseInt(hours, 10);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12;
+    h = h || 12;
+    const hStr = h < 10 ? '0' + h : h.toString();
+    return `${hStr}:${minutes} ${ampm}`;
+  } catch (error) {
+    return timeString;
+  }
+};
+
+//  new helper function for formatting the  sent time
+const formatSentTime = (dateTimeString?: string) => {
+  // This check is crucial for old records
+  if (!dateTimeString) {
+    return 'N/A';
+  }
+  try {
+    const date = new Date(dateTimeString);
+    // Check if the date is valid after creation
+    if (isNaN(date.getTime())) {
+      return 'N/A';
+    }
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch (error) {
+    return 'N/A';
+  }
+};
+
 
 export function AdminDashboard() {
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
@@ -39,14 +91,15 @@ export function AdminDashboard() {
   const [sentNotifications, setSentNotifications] = useState<SentNotification[]>([]);
   const [adminNotifications, setAdminNotifications] = useState<AppNotification[]>([]);
   const [adminAttendance, setAdminAttendance] = useState<Attendance[]>([]);
+  const [adminSalaryHistory, setAdminSalaryHistory] = useState<Salary[]>([]);
   const [allUserAttendance, setAllUserAttendance] = useState<AllUserAttendance[]>([]);
-  
+
   const [filteredAdminNotifications, setFilteredAdminNotifications] = useState<AppNotification[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<'all' | 'today'>('all');
   const [allAttendanceFilter, setAllAttendanceFilter] = useState<'today' | 'all'>('today');
 
   const [notificationMessage, setNotificationMessage] = useState("");
-  const [notificationRecipient, setNotificationRecipient] = useState("all");
+  const [notificationRecipients, setNotificationRecipients] = useState<string[]>(["all"]);
   const [salaryEmployeeId, setSalaryEmployeeId] = useState("");
   const [salaryAmount, setSalaryAmount] = useState<number | "">("");
   const [salaryMonth, setSalaryMonth] = useState("");
@@ -68,8 +121,8 @@ export function AdminDashboard() {
 
   const fetchData = async () => {
     try {
-      const attendanceEndpoint = allAttendanceFilter === 'today' 
-        ? '/admin/attendance/today' 
+      const attendanceEndpoint = allAttendanceFilter === 'today'
+        ? '/admin/attendance/today'
         : '/admin/attendance/all';
 
       const [
@@ -80,6 +133,7 @@ export function AdminDashboard() {
         adminNotificationsRes,
         adminAttendanceRes,
         allAttendanceRes,
+        adminSalaryRes
       ] = await Promise.all([
         api.get("/admin/employees"),
         api.get("/admin/leave-requests"),
@@ -88,6 +142,7 @@ export function AdminDashboard() {
         api.get(`/admin/${user.id}/notifications`),
         api.get(`/admin/${user.id}/attendance`),
         api.get(attendanceEndpoint),
+        api.get(`/admin/${user.id}/salaries`),
       ]);
 
       setAllEmployees(employeesRes.data);
@@ -97,6 +152,7 @@ export function AdminDashboard() {
       setAdminNotifications(adminNotificationsRes.data);
       setAdminAttendance(adminAttendanceRes.data);
       setAllUserAttendance(allAttendanceRes.data);
+      setAdminSalaryHistory(adminSalaryRes.data);
 
       const today = new Date().toISOString().slice(0, 10);
       const myTodaysAttendance = adminAttendanceRes.data.find((att: any) => att.date === today);
@@ -153,7 +209,7 @@ export function AdminDashboard() {
       toast.error("Failed to punch in.");
     }
   };
-  
+
   const handleAdminPunchOut = async () => {
     try {
       await api.post(`/admin/${user.id}/punch-out`);
@@ -238,20 +294,30 @@ export function AdminDashboard() {
   };
 
   const handleSendNotification = async () => {
+
     if (!notificationMessage.trim()) {
       toast.error("Notification message cannot be empty.");
       return;
     }
 
+    if (notificationRecipients.length === 0) {
+      toast.error("Please select at least one recipient.");
+      return;
+    }
+
     try {
+      const recipientData = notificationRecipients.includes('all') ? 'all' : notificationRecipients;
+
       await api.post("/admin/notifications", {
-        recipient: notificationRecipient,
+        recipient: recipientData,
         message: notificationMessage,
+        senderId: user.id,
       });
+
       fetchData();
       toast.success(`Notification sent.`);
       setNotificationMessage("");
-      setNotificationRecipient("all");
+      setNotificationRecipients(['all']);
     } catch (error) {
       toast.error("Failed to send notification.");
     }
@@ -399,9 +465,9 @@ export function AdminDashboard() {
                 <TableBody>
                   {adminAttendance.map((att) => (
                     <TableRow key={`my-att-${att.date}`}>
-                      <TableCell>{att.date}</TableCell>
-                      <TableCell>{att.checkIn || "--"}</TableCell>
-                      <TableCell>{att.checkOut || "--"}</TableCell>
+                      <TableCell>{formatDate(att.date)}</TableCell>
+                      <TableCell>{formatTime(att.checkIn || "--")}</TableCell>
+                      <TableCell>{formatTime(att.checkOut || "--")}</TableCell>
                       <TableCell>
                         <Badge
                           variant={
@@ -466,22 +532,22 @@ export function AdminDashboard() {
                       <TableCell>
                         <Badge variant="secondary">{att.role}</Badge>
                       </TableCell>
-                      <TableCell>{att.date}</TableCell>
-                      <TableCell>{att.checkIn || "--"}</TableCell>
-                      <TableCell>{att.checkOut || "--"}</TableCell>
+                      <TableCell>{formatDate(att.date)}</TableCell>
+                      <TableCell>{formatTime(att.checkIn || "--")}</TableCell>
+                      <TableCell>{formatTime(att.checkOut || "--")}</TableCell>
                       <TableCell>
                         <Badge
                           variant={
                             att.status === "Present"
                               ? "default"
                               : att.status === "Punched In"
-                              ? "default"
-                              : att.status === "Absent"
-                              ? "destructive"
-                              : "outline"
+                                ? "default"
+                                : att.status === "Absent"
+                                  ? "destructive"
+                                  : "outline"
                           }
                           className={
-                              att.status === "Not Punched In"
+                            att.status === "Not Punched In"
                               ? "bg-gray-200 text-gray-700"
                               : ""
                           }
@@ -520,7 +586,7 @@ export function AdminDashboard() {
                       <TableCell>{req.employeeName}</TableCell>
                       <TableCell>{req.type}</TableCell>
                       <TableCell>
-                        {req.startDate} to {req.endDate}
+                        {formatDate(req.startDate)} to {formatDate(req.endDate)}
                       </TableCell>
                       <TableCell className="max-w-xs truncate">
                         {req.reason || "N/A"}
@@ -620,19 +686,61 @@ export function AdminDashboard() {
             <CardContent className="space-y-4">
               <div>
                 <Label htmlFor="recipient">Recipient</Label>
-                <select
-                  id="recipient"
-                  className="w-full p-2 border rounded mt-1 bg-background"
-                  value={notificationRecipient}
-                  onChange={(e) => setNotificationRecipient(e.target.value)}
-                >
-                  <option value="all">All Employees</option>
-                  {allEmployees.map((emp) => (
-                    <option key={emp._id} value={emp._id}>
-                      {emp.name}
-                    </option>
-                  ))}
-                </select>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      className="w-full justify-between"
+                    >
+                      <div className="flex gap-1 flex-wrap">
+                        {notificationRecipients.includes('all') ? (
+                          <Badge>All Employees</Badge>
+                        ) : (
+                          allEmployees
+                            .filter(emp => notificationRecipients.includes(emp._id))
+                            .map(emp => <Badge key={emp._id}>{emp.name}</Badge>)
+                        )}
+                      </div>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-full p-0">
+                    <Command>
+                      <CommandInput placeholder="Search employees..." />
+                      <CommandList>
+                        <CommandEmpty>No employee found.</CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem
+                            onSelect={() => {
+                              setNotificationRecipients(['all']);
+                            }}
+                          >
+                            All Employees
+                          </CommandItem>
+                          {allEmployees.map((employee) => (
+                            <CommandItem
+                              key={employee._id}
+                              onSelect={() => {
+                                if (notificationRecipients.includes('all')) {
+                                  setNotificationRecipients([employee._id]);
+                                } else if (notificationRecipients.includes(employee._id)) {
+                                  setNotificationRecipients(
+                                    notificationRecipients.filter((id) => id !== employee._id)
+                                  );
+                                } else {
+                                  setNotificationRecipients([...notificationRecipients, employee._id]);
+                                }
+                              }}
+                            >
+                              {employee.name}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div>
                 <Label htmlFor="message">Message</Label>
@@ -658,20 +766,28 @@ export function AdminDashboard() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Date</TableHead>
+                    <TableHead>Time</TableHead>
                     <TableHead>Message</TableHead>
                     <TableHead>Recipient</TableHead>
+                    <TableHead>Sent By</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {sentNotifications.map((notif) => (
                     <TableRow key={notif._id}>
                       <TableCell className="whitespace-nowrap">
-                        {notif.date}
+                        {formatDate(notif.date)}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {formatSentTime(notif.sentAt)}
                       </TableCell>
                       <TableCell className="max-w-md truncate">
                         {notif.message}
                       </TableCell>
                       <TableCell>{notif.recipient}</TableCell>
+                      <TableCell>
+                        {notif.sentBy ? `${notif.sentBy.name} (${notif.sentBy.role})` : 'N/A'}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -679,9 +795,9 @@ export function AdminDashboard() {
             </CardContent>
           </Card>
 
-           <Card>
+          <Card>
             <CardHeader>
-               <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center">
                   <Bell className="mr-2 h-5 w-5" /> My Notifications
                 </CardTitle>
@@ -701,25 +817,28 @@ export function AdminDashboard() {
                     >
                       <div className="flex items-start space-x-4">
                         <span
-                          className={`mt-1.5 h-2 w-2 rounded-full ${
-                            notification.status === "unread"
-                              ? "bg-blue-500"
-                              : "bg-gray-300"
-                          }`}
+                          className={`mt-1.5 h-2 w-2 rounded-full ${notification.status === "unread"
+                            ? "bg-blue-500"
+                            : "bg-gray-300"
+                            }`}
                         />
                         <div className="flex flex-col">
                           <p
-                            className={`text-sm ${
-                              notification.status === "unread"
-                                ? "font-semibold text-primary"
-                                : "text-muted-foreground"
-                            }`}
+                            className={`text-sm ${notification.status === "unread"
+                              ? "font-semibold text-primary"
+                              : "text-muted-foreground"
+                              }`}
                           >
                             {notification.message}
                           </p>
                           <p className="text-xs text-muted-foreground mt-1">
-                            {notification.date}
+                            {formatDate(notification.date)}
                           </p>
+                          {notification.sentBy && (
+                            <p className="text-xs font-semibold text-muted-foreground mt-1">
+                              - {notification.sentBy.name} ({notification.sentBy.role})
+                            </p>
+                          )}
                         </div>
                       </div>
                       {notification.status === "unread" && (
@@ -817,7 +936,32 @@ export function AdminDashboard() {
                       <TableCell>{sal.employeeName}</TableCell>
                       <TableCell>{sal.month}</TableCell>
                       <TableCell>₹{sal.amount.toLocaleString()}</TableCell>
-                      <TableCell>{sal.date || "N/A"}</TableCell>
+                      <TableCell>{formatDate(sal.date) || "N/A"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+           <Card>
+            <CardHeader><CardTitle>My Salary History</CardTitle></CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Month</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Date Punched</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {adminSalaryHistory.map((sal) => (
+                    <TableRow key={sal.month}>
+                      <TableCell>{sal.month}</TableCell>
+                      <TableCell>₹{sal.amount.toLocaleString()}</TableCell>
+                      <TableCell><Badge>{sal.status}</Badge></TableCell>
+                      <TableCell>{formatDate(sal.date)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

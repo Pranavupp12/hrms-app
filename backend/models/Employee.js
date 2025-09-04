@@ -14,6 +14,7 @@ const notificationSchema = new Schema({
   message: String,
   date: String,
   status: { type: String, default: 'unread' },
+  sentBy: { type: Schema.Types.ObjectId, ref: 'Employee' } 
 });
 
 const salarySchema = new Schema({

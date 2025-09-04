@@ -20,6 +20,10 @@ export interface AppNotification {
   message: string;
   date: string;
   status: "read" | "unread";
+  sentBy?: { 
+    name: string;
+    role: string;
+  };
 }
 
 export interface Salary {
@@ -61,4 +65,9 @@ export interface SentNotification {
   date: string;
   message: string;
   recipient: 'All Employees' | string; // Can be 'All Employees' or a specific employee's name
+  sentBy: {
+    name: string;
+    role: string;
+  };
+  sentAt: string;
 }
