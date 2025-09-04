@@ -47,7 +47,7 @@ export interface Employee {
   id: string;
   name: string;
   email: string;
-  role: "Employee" | "Admin";
+  role: "Employee" | "Admin" | "HR";
   filePath?: string; 
   fileName?: string; 
   attendance: Attendance[];

@@ -17,6 +17,7 @@ interface EmployeeModalProps {
   onSubmit: (data: FormData) => void;
   employee: Employee | null;
   viewMode?: boolean;
+  isHr?: boolean;
 }
 
 export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = false }: EmployeeModalProps) {
@@ -114,6 +115,7 @@ export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = 
               <select id="role" value={role} onChange={(e) => setRole(e.target.value)} className="w-full p-2 border rounded bg-background">
                 <option value="Employee">Employee</option>
                 <option value="Admin">Admin</option>
+                <option value="HR">HR</option>
               </select>
             </div>
             <div className="grid gap-2">

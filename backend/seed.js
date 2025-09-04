@@ -51,3 +51,6 @@ const seedDB = async () => {
 };
 
 seedDB();
+
+// Function to seed the database with initial data
+// Usage: node backend/seed.js

@@ -6,8 +6,10 @@ const path = require('path');
 const { scheduleAttendanceJob } = require('./cron/attendanceMarker');
 
 
+
 const employeeRoutes = require('./routes/employeeRoutes');
 const adminRoutes = require('./routes/adminRoutes');
+const hrRoutes = require('./routes/hrRoutes');
 const authRoutes = require('./routes/authRoutes');
 
 const app = express();
@@ -37,7 +39,9 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api/auth', authRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/hr', hrRoutes);
 
+// Schedule the absent marking job
 scheduleAttendanceJob();
 
 app.listen(PORT, () => {

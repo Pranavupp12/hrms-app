@@ -23,6 +23,8 @@ export function LoginPage() {
 
       if (user.role === 'Admin') {
         navigate('/admin');
+      } else if(user.role === 'HR') {
+        navigate('/hr');
       } else {
         navigate('/dashboard');
       }
@@ -80,6 +82,11 @@ export function LoginPage() {
                   <p className="font-semibold">Employee:</p>
                   <p>Email: <span className="font-mono">john.doe@example.com</span></p>
                   <p>Password: <span className="font-mono">password123</span></p>
+                </div>
+                <div>
+                  <p className="font-semibold">HR:</p>
+                  <p>Email: <span className="font-mono">priyahr@gmail.com</span></p>
+                  <p>Password: <span className="font-mono">pass123</span></p>
                 </div>
               </div>
             </div>

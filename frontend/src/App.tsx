@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom';
 import { LoginPage } from './pages/LoginPage';
 import { EmployeeDashboard } from './pages/employee/EmployeeDashboard';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
+import { HrDashboard } from './pages/hr/HrDashboard';
 import { Toaster } from 'sonner'; 
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
         {/* Your protected routes */}
         <Route path="/dashboard" element={<EmployeeDashboard />} />
         <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/hr" element={<HrDashboard />} /> {/* Add HR Dashboard Route */}
 
         {/* A catch-all route for any undefined paths */}
         <Route path="*" element={<div>404: Page Not Found</div>} />

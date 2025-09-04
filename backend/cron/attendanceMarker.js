@@ -57,4 +57,4 @@ const scheduleAttendanceJob = () => {
   console.log('Scheduled cron job to mark absentees daily at 1:00 AM IST.');
 };
 
-module.exports = { scheduleAttendanceJob };
+module.exports = { scheduleAttendanceJob, markAbsentees };

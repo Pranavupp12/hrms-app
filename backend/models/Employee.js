@@ -34,7 +34,7 @@ const employeeSchema = new Schema({
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ['Employee', 'Admin'], default: 'Employee' },
+  role: { type: String, enum: ['Employee', 'Admin', 'HR'], default: 'Employee' },
   attendance: [attendanceSchema],
   fileName: { type: String },
   filePath: { type: String }, 
