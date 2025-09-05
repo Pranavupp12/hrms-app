@@ -217,13 +217,29 @@ exports.getSalaryHistory = async (req, res) => {
 
 // Punch in salary for an employee
 exports.punchSalary = async (req, res) => {
-    const { employeeId, amount, month } = req.body;
+    const { employeeIds, amount, month } = req.body; // Changed to employeeIds (plural)
     try {
-        const employee = await Employee.findById(employeeId);
-        if (!employee) return res.status(404).json({ message: 'Employee not found.' });
-        employee.salaryHistory.push({ amount, month, status: 'Paid', date: new Date().toISOString().slice(0, 10) });
-        await employee.save();
-        res.status(201).json(employee.salaryHistory);
+        if (!Array.isArray(employeeIds) || employeeIds.length === 0) {
+            return res.status(400).json({ message: 'Please select at least one employee.' });
+        }
+
+        const salaryRecord = {
+            amount,
+            month,
+            status: 'Paid',
+            date: new Date().toISOString().slice(0, 10)
+        };
+
+        const result = await Employee.updateMany(
+            { _id: { $in: employeeIds } },
+            { $push: { salaryHistory: salaryRecord } }
+        );
+
+        if (result.nModified === 0) {
+            return res.status(404).json({ message: 'No employees found for the provided IDs.' });
+        }
+
+        res.status(201).json({ message: `Successfully punched salary for ${result.nModified} employees.` });
     } catch (error) {
         res.status(500).json({ message: 'Error punching salary' });
     }

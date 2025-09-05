@@ -27,7 +27,7 @@ import type {
   AllUserAttendance,
   PunchStatus
 } from "@/types";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../../api";
@@ -83,6 +83,11 @@ const formatSentTime = (dateTimeString?: string) => {
   }
 };
 
+const months = [
+    "January", "February", "March", "April", "May", "June", 
+    "July", "August", "September", "October", "November", "December"
+];
+
 
 export function AdminDashboard() {
   const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
@@ -96,11 +101,12 @@ export function AdminDashboard() {
 
   const [filteredAdminNotifications, setFilteredAdminNotifications] = useState<AppNotification[]>([]);
   const [notificationFilter, setNotificationFilter] = useState<'all' | 'today'>('all');
+  const [sentHistoryFilter, setSentHistoryFilter] = useState<'all' | 'today'>('all');
   const [allAttendanceFilter, setAllAttendanceFilter] = useState<'today' | 'all'>('today');
 
   const [notificationMessage, setNotificationMessage] = useState("");
   const [notificationRecipients, setNotificationRecipients] = useState<string[]>(["all"]);
-  const [salaryEmployeeId, setSalaryEmployeeId] = useState("");
+  const [salaryEmployeeIds, setSalaryEmployeeIds] = useState<string[]>([]);
   const [salaryAmount, setSalaryAmount] = useState<number | "">("");
   const [salaryMonth, setSalaryMonth] = useState("");
 
@@ -110,6 +116,13 @@ export function AdminDashboard() {
 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [adminPunchStatus, setAdminPunchStatus] = useState<PunchStatus>('punched-out');
+
+  const [filterYear, setFilterYear] = useState('');
+  const [filterMonth, setFilterMonth] = useState('');
+
+  const [mySalaryFilterYear, setMySalaryFilterYear] = useState('');
+  const [mySalaryFilterMonth, setMySalaryFilterMonth] = useState('');
+
 
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -189,6 +202,50 @@ export function AdminDashboard() {
     }
     fetchData();
   }, [user.id, navigate, allAttendanceFilter]);
+
+   const filteredSalaryHistory = useMemo(() => {
+    if (!filterYear && !filterMonth) {
+      return salaryHistory;
+    }
+    return salaryHistory.filter(sal => {
+      const period = sal.month.toLowerCase();
+      const yearMatch = !filterYear || period.includes(filterYear);
+      const monthMatch = !filterMonth || period.startsWith(filterMonth.toLowerCase());
+      return yearMatch && monthMatch;
+    });
+  }, [salaryHistory, filterYear, filterMonth]);
+
+  const availableYears = useMemo(() => {
+    const years = new Set(salaryHistory.map(sal => sal.month.split(' ')[1]).filter(Boolean));
+    return Array.from(years).sort((a, b) => parseInt(b) - parseInt(a));
+  }, [salaryHistory]);
+
+  const filteredAdminSalaryHistory = useMemo(() => {
+    if (!mySalaryFilterYear && !mySalaryFilterMonth) {
+      return adminSalaryHistory;
+    }
+    return adminSalaryHistory.filter(sal => {
+      const period = sal.month.toLowerCase();
+      const yearMatch = !mySalaryFilterYear || period.includes(mySalaryFilterYear.toLowerCase());
+      const monthMatch = !mySalaryFilterMonth || period.startsWith(mySalaryFilterMonth.toLowerCase());
+      return yearMatch && monthMatch;
+    });
+  }, [adminSalaryHistory, mySalaryFilterYear, mySalaryFilterMonth]);
+
+const myAvailableYears = useMemo(() => {
+    const years = new Set(adminSalaryHistory.map(sal => (sal.month.match(/\d{4}/)?.[0])).filter(Boolean));
+    return Array.from(years).sort((a, b) => parseInt(b!) - parseInt(a!));
+  }, [adminSalaryHistory]);
+
+  const filteredSentHistory = useMemo(() => {
+    if (sentHistoryFilter === 'today') {
+      const today = new Date().toISOString().slice(0, 10);
+      return sentNotifications.filter(n => n.date === today);
+    }
+    return sentNotifications;
+  }, [sentNotifications, sentHistoryFilter]);
+
+
 
   useEffect(() => {
     if (notificationFilter === 'today') {
@@ -334,20 +391,20 @@ export function AdminDashboard() {
   };
 
   const handleSalaryPunchIn = async () => {
-    if (!salaryEmployeeId || !salaryAmount || !salaryMonth.trim()) {
-      toast.error("Please fill out all salary fields.");
+    if (salaryEmployeeIds.length === 0 || !salaryAmount || !salaryMonth.trim()) {
+      toast.error("Please fill out all salary fields and select at least one employee .");
       return;
     }
 
     try {
       await api.post("/admin/salary", {
-        employeeId: salaryEmployeeId,
+        employeeIds: salaryEmployeeIds,
         amount: salaryAmount,
         month: salaryMonth,
       });
       fetchData();
-      toast.success(`Salary punched in.`);
-      setSalaryEmployeeId("");
+      toast.success(`Salary punched in for ${salaryEmployeeIds.length} employee(s).`);
+      setSalaryEmployeeIds([]);
       setSalaryAmount("");
       setSalaryMonth("");
     } catch (error) {
@@ -758,8 +815,12 @@ export function AdminDashboard() {
           </Card>
 
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Sent Notifications History</CardTitle>
+              <div className="space-x-2">
+                <Button size="sm" variant={sentHistoryFilter === 'all' ? 'default' : 'outline'} onClick={() => setSentHistoryFilter('all')}>All</Button>
+                <Button size="sm" variant={sentHistoryFilter === 'today' ? 'default' : 'outline'} onClick={() => setSentHistoryFilter('today')}>Today</Button>
+              </div>
             </CardHeader>
             <CardContent>
               <Table>
@@ -773,7 +834,7 @@ export function AdminDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sentNotifications.map((notif) => (
+                  {filteredSentHistory.map((notif) => (
                     <TableRow key={notif._id}>
                       <TableCell className="whitespace-nowrap">
                         {formatDate(notif.date)}
@@ -868,23 +929,51 @@ export function AdminDashboard() {
               <CardTitle>Punch In Employee Salary</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <Label htmlFor="salary-employee">Select Employee</Label>
-                <select
-                  id="salary-employee"
-                  className="w-full p-2 border rounded mt-1 bg-background"
-                  value={salaryEmployeeId}
-                  onChange={(e) => setSalaryEmployeeId(e.target.value)}
-                >
-                  <option value="" disabled>
-                    Select an employee...
-                  </option>
-                  {allEmployees.map((emp) => (
-                    <option key={emp._id} value={emp._id}>
-                      {emp.name}
-                    </option>
-                  ))}
-                </select>
+             <div>
+                <Label htmlFor="salary-employee">Select Employee(s)</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      className="w-full justify-between h-auto min-h-10"
+                    >
+                      <div className="flex gap-1 flex-wrap">
+                        {salaryEmployeeIds.length > 0 ? (
+                          allEmployees
+                            .filter(emp => salaryEmployeeIds.includes(emp._id))
+                            .map(emp => <Badge key={emp._id}>{emp.name}</Badge>)
+                        ) : (
+                          <span>Select employee(s)...</span>
+                        )}
+                      </div>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0">
+                    <Command>
+                      <CommandInput placeholder="Search employees..." />
+                      <CommandList>
+                        <CommandEmpty>No employee found.</CommandEmpty>
+                        <CommandGroup>
+                          {allEmployees.map((employee) => (
+                            <CommandItem
+                              key={employee._id}
+                              onSelect={() => {
+                                const newSelection = salaryEmployeeIds.includes(employee._id)
+                                  ? salaryEmployeeIds.filter((id) => id !== employee._id)
+                                  : [...salaryEmployeeIds, employee._id];
+                                setSalaryEmployeeIds(newSelection);
+                              }}
+                            >
+                              {employee.name}
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
               <div>
                 <Label htmlFor="salary-amount">Salary Amount (₹)</Label>
@@ -917,8 +1006,27 @@ export function AdminDashboard() {
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle>Salary Punch-In History</CardTitle>
+           <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>All Salary History</CardTitle>
+              <div className="flex items-center gap-2">
+                <select 
+                    value={filterMonth} 
+                    onChange={(e) => setFilterMonth(e.target.value)}
+                    className="p-2 border rounded bg-background text-sm"
+                >
+                    <option value="">Filter by Month...</option>
+                    {months.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select 
+                    value={filterYear} 
+                    onChange={(e) => setFilterYear(e.target.value)}
+                    className="p-2 border rounded bg-background text-sm"
+                >
+                    <option value="">Filter by Year...</option>
+                    {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <Button variant="outline" size="sm" onClick={() => { setFilterMonth(''); setFilterYear(''); }}>Clear</Button>
+              </div>
             </CardHeader>
             <CardContent>
               <Table>
@@ -931,7 +1039,7 @@ export function AdminDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {salaryHistory.map((sal) => (
+                  {filteredSalaryHistory.map((sal) => (
                     <TableRow key={sal.id}>
                       <TableCell>{sal.employeeName}</TableCell>
                       <TableCell>{sal.month}</TableCell>
@@ -944,7 +1052,28 @@ export function AdminDashboard() {
             </CardContent>
           </Card>
            <Card>
-            <CardHeader><CardTitle>My Salary History</CardTitle></CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>My Salary History</CardTitle>
+                <div className="flex items-center gap-2">
+                    <select 
+                        value={mySalaryFilterMonth} 
+                        onChange={(e) => setMySalaryFilterMonth(e.target.value)}
+                        className="p-2 border rounded bg-background text-sm"
+                    >
+                        <option value="">Filter by Month...</option>
+                        {months.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                    <select 
+                        value={mySalaryFilterYear} 
+                        onChange={(e) => setMySalaryFilterYear(e.target.value)}
+                        className="p-2 border rounded bg-background text-sm"
+                    >
+                        <option value="">Filter by Year...</option>
+                        {myAvailableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    <Button variant="outline" size="sm" onClick={() => { setMySalaryFilterMonth(''); setMySalaryFilterYear(''); }}>Clear</Button>
+                </div>
+            </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
@@ -956,7 +1085,7 @@ export function AdminDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {adminSalaryHistory.map((sal) => (
+                  {filteredAdminSalaryHistory.map((sal) => (
                     <TableRow key={sal.month}>
                       <TableCell>{sal.month}</TableCell>
                       <TableCell>₹{sal.amount.toLocaleString()}</TableCell>

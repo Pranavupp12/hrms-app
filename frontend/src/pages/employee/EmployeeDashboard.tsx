@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { PunchStatus, Employee, LeaveRequest, AppNotification } from "@/types";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ApplyLeaveModal } from "@/components/shared/ApplyLeaveModal";
@@ -41,6 +41,12 @@ const formatTime = (timeString?: string) => {
   }
 };
 
+const months = [
+    "January", "February", "March", "April", "May", "June", 
+    "July", "August", "September", "October", "November", "December"
+];
+
+
 export function EmployeeDashboard() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [filteredNotifications, setFilteredNotifications] = useState<AppNotification[]>([]);
@@ -48,6 +54,9 @@ export function EmployeeDashboard() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [punchStatus, setPunchStatus] = useState<PunchStatus>('punched-out');
   const navigate = useNavigate();
+
+  const [filterYear, setFilterYear] = useState('');
+  const [filterMonth, setFilterMonth] = useState('');
 
   // The user object from localStorage contains 'id' which is an alias for '_id' from the backend
   const user = JSON.parse(localStorage.getItem('user') || '{}');
@@ -128,6 +137,28 @@ export function EmployeeDashboard() {
       }
     }
   }, [employee, notificationFilter]);
+
+
+  const filteredSalaryHistory = useMemo(() => {
+    if (!employee) return [];
+    if (!filterYear && !filterMonth) {
+      return employee.salaryHistory;
+    }
+    return employee.salaryHistory.filter(sal => {
+      const period = sal.month.toLowerCase();
+      const yearMatch = !filterYear || period.includes(filterYear.toLowerCase());
+      const monthMatch = !filterMonth || period.startsWith(filterMonth.toLowerCase());
+      return yearMatch && monthMatch;
+    });
+  }, [employee, filterYear, filterMonth]);
+
+  const availableYears = useMemo(() => {
+    if (!employee) return [];
+    const years = employee.salaryHistory
+      .map(sal => (sal.month.match(/\d{4}/)?.[0] ))
+      .filter((year): year is string => !!year);
+    return Array.from(new Set(years)).sort((a, b) => parseInt(b) - parseInt(a));
+  }, [employee]);
 
   const handlePunchIn = async () => {
     try {
@@ -281,7 +312,28 @@ export function EmployeeDashboard() {
 
         <TabsContent value="salary" className="mt-4">
           <Card>
-            <CardHeader><CardTitle>My Salary History</CardTitle></CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>My Salary History</CardTitle>
+              <div className="flex items-center gap-2">
+                <select 
+                    value={filterMonth} 
+                    onChange={(e) => setFilterMonth(e.target.value)}
+                    className="p-2 border rounded bg-background text-sm"
+                >
+                    <option value="">Filter by Month...</option>
+                    {months.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <select 
+                    value={filterYear} 
+                    onChange={(e) => setFilterYear(e.target.value)}
+                    className="p-2 border rounded bg-background text-sm"
+                >
+                    <option value="">Filter by Year...</option>
+                    {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+                <Button variant="outline" size="sm" onClick={() => { setFilterMonth(''); setFilterYear(''); }}>Clear</Button>
+              </div>
+            </CardHeader>
             <CardContent>
               <Table>
                 <TableHeader>
@@ -293,7 +345,7 @@ export function EmployeeDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {employee.salaryHistory.map((sal) => (
+                  {filteredSalaryHistory.map((sal) => (
                     <TableRow key={sal.month}>
                       <TableCell>{sal.month}</TableCell>
                       <TableCell>₹{sal.amount.toLocaleString()}</TableCell>
