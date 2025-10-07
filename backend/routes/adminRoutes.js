@@ -20,6 +20,7 @@ router.get('/employees', adminController.getAllEmployees);
 router.post('/employees',upload.single('file'), adminController.addEmployee);
 router.put('/employees/:id', upload.single('file'), adminController.updateEmployee);
 router.delete('/employees/:id', adminController.deleteEmployee);
+router.put('/grant-reupload-access', adminController.grantReuploadAccess);
 
 // Leave Management
 router.get('/leave-requests', adminController.getAllLeaveRequests);
@@ -36,8 +37,10 @@ router.put('/:id/notifications/:notificationId', adminController.markNotificatio
 
 // Salary Management
 router.get('/salaries', adminController.getSalaryHistory);
-router.post('/salary', adminController.punchSalary);
+//router.post('/salary', adminController.punchSalary);
 router.get('/:id/salaries', adminController.getAdminSalaryHistory); 
+router.post('/generate-salary', adminController.generateSalarySlips);
+
 
 // Attendance Routes 
 router.get('/attendance/all', adminController.getAllAttendance);
@@ -45,5 +48,7 @@ router.get('/attendance/today', adminController.getTodaysAttendance);
 router.get('/:id/attendance', adminController.getAdminAttendance);
 router.post('/:id/punch-in', adminController.adminPunchIn);
 router.post('/:id/punch-out', adminController.adminPunchOut);
+router.put('/attendance/manual-mark', adminController.manualMarkAttendance);
+router.get('/attendance-sheet', adminController.getAttendanceSheet);
 
 module.exports = router;

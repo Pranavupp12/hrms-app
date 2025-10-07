@@ -2,32 +2,29 @@ const cron = require('node-cron');
 const Employee = require('../models/Employee');
 
 const markAbsentees = async () => {
-  console.log('Running daily job to mark absentees...');
+  console.log('Running daily job to mark absentees at 11 AM...');
   
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  const yesterdayString = yesterday.toISOString().slice(0, 10);
+  const todayString = new Date().toISOString().slice(0, 10);
 
   try {
-    // This is an efficient way to find only the employees who missed punching in.
-    const employeesWithoutYesterdayAttendance = await Employee.find({
-      'attendance.date': { $ne: yesterdayString }
+    // Find all employees who do NOT have an attendance record for today
+    const employeesWithoutTodayAttendance = await Employee.find({
+      'attendance.date': { $ne: todayString }
     });
 
-    if (employeesWithoutYesterdayAttendance.length === 0) {
-      console.log(`No absentees to mark for ${yesterdayString}.`);
+    if (employeesWithoutTodayAttendance.length === 0) {
+      console.log(`All employees have punched in for ${todayString}.`);
       return;
     }
 
-    // Prepare a list of updates to be executed in a single database command.
-    const bulkOps = employeesWithoutYesterdayAttendance.map(employee => ({
+    // Prepare the bulk update operation
+    const bulkOps = employeesWithoutTodayAttendance.map(employee => ({
       updateOne: {
         filter: { _id: employee._id },
         update: {
           $push: {
             attendance: {
-              date: yesterdayString,
+              date: todayString,
               checkIn: '--',
               checkOut: '--',
               status: 'Absent'
@@ -37,9 +34,9 @@ const markAbsentees = async () => {
       }
     }));
 
-    // Execute all the updates at once for better performance.
+    // Execute the bulk update
     await Employee.bulkWrite(bulkOps);
-    console.log(`Successfully marked ${bulkOps.length} employees as absent for ${yesterdayString}.`);
+    console.log(`Successfully marked ${bulkOps.length} employees as absent for ${todayString}.`);
 
   } catch (error) {
     console.error('Error in cron job while marking absentees:', error);
@@ -47,14 +44,14 @@ const markAbsentees = async () => {
 };
 
 /**
- * Schedules the attendance job to run every day at 1:00 AM India Standard Time.
- * The cron string '0 1 * * *' means: at minute 0 of hour 1, every day, every month, every day of the week.
+ * Schedules the attendance job to run every day at 11:00 AM India Standard Time.
+ * The cron string '0 11 * * *' means: at minute 0 of hour 11, every day.
  */
 const scheduleAttendanceJob = () => {
-  cron.schedule('0 1 * * *', markAbsentees, {
+  cron.schedule('0 11 * * *', markAbsentees, {
     timezone: "Asia/Kolkata"
   });
-  console.log('Scheduled cron job to mark absentees daily at 1:00 AM IST.');
+  console.log('Scheduled cron job to mark absentees daily at 11:00 AM IST.');
 };
 
 module.exports = { scheduleAttendanceJob, markAbsentees };

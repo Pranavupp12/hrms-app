@@ -11,6 +11,7 @@ const employeeRoutes = require('./routes/employeeRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const hrRoutes = require('./routes/hrRoutes');
 const authRoutes = require('./routes/authRoutes');
+const detailsRoutes = require('./routes/detailsRoutes');
 
 const app = express();
 const PORT = 5001;
@@ -40,6 +41,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/hr', hrRoutes);
+app.use('/api/details', detailsRoutes);
+
+// this line to serve the 'slips' folder as static files
+app.use('/slips', express.static('slips'));
 
 // Schedule the absent marking job
 scheduleAttendanceJob();

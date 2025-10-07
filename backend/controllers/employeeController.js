@@ -78,6 +78,15 @@ exports.markNotificationAsRead = async (req, res) => {
 
 exports.punchIn = async (req, res) => {
     try {
+
+        const now = new Date();
+        const currentHour = now.getHours();
+
+        // Check if current time is outside the 9 AM to 11 AM window
+        if (currentHour < 9 || currentHour >= 11) {
+            return res.status(400).json({ message: 'Punch-in is only allowed between 9 AM and 11 AM.' });
+        }
+        
         const employee = await Employee.findById(req.params.id);
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
 
@@ -105,20 +114,23 @@ exports.punchIn = async (req, res) => {
 };
 
 
+// backend/controllers/employeeController.js
 exports.punchOut = async (req, res) => {
     try {
+        
         const employee = await Employee.findById(req.params.id);
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
 
         const today = new Date().toISOString().slice(0, 10);
-        const attendanceRecord = employee.attendance.find(att => att.date === today);
+
+        const attendanceRecord = employee.attendance.find(att => 
+            att.date === today && 
+            att.checkIn && att.checkIn !== '--' && 
+            (!att.checkOut || att.checkOut === '--' || att.checkOut === '')
+        );
 
         if (!attendanceRecord) {
             return res.status(400).json({ message: 'Cannot punch out without punching in first' });
-        }
-
-        if (attendanceRecord.checkOut) {
-            return res.status(400).json({ message: 'Already punched out for today' });
         }
 
         attendanceRecord.checkOut = new Date().toLocaleTimeString('en-IN', { hour12: false });

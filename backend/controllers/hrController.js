@@ -16,7 +16,7 @@ exports.getAllEmployees = async (req, res) => {
 
 // Add a new employee
 exports.addEmployee = async (req, res) => {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, baseSalary } = req.body;
     try {
         const newEmployeeData = {
             name,
@@ -24,7 +24,8 @@ exports.addEmployee = async (req, res) => {
             password,
             role: role || 'Employee',
             filePath: req.file ? req.file.path : null,
-            fileName: req.file ? req.file.originalname : null
+            fileName: req.file ? req.file.originalname : null,
+            baseSalary
         };
         const newEmployee = new Employee(newEmployeeData);
         await newEmployee.save();
@@ -157,6 +158,14 @@ exports.getHrAttendance = async (req, res) => {
 // Punch In for HR
 exports.hrPunchIn = async (req, res) => {
     try {
+
+        const now = new Date();
+        const currentHour = now.getHours();
+        
+        if (currentHour < 9 || currentHour >= 11) {
+            return res.status(400).json({ message: 'Punch-in is only allowed between 9 AM and 11 AM.' });
+        }
+
         const hr = await Employee.findById(req.params.id);
         if (!hr) return res.status(404).json({ message: 'HR not found' });
 
@@ -184,20 +193,22 @@ exports.hrPunchIn = async (req, res) => {
 };
 
 // Punch Out for HR
+// backend/controllers/hrController.js
 exports.hrPunchOut = async (req, res) => {
     try {
         const hr = await Employee.findById(req.params.id);
         if (!hr) return res.status(404).json({ message: 'HR not found' });
 
         const today = new Date().toISOString().slice(0, 10);
-        const attendanceRecord = hr.attendance.find(att => att.date === today);
+        
+        const attendanceRecord = hr.attendance.find(att => 
+            att.date === today && 
+            att.checkIn && att.checkIn !== '--' && 
+            (!att.checkOut || att.checkOut === '--' || att.checkOut === '')
+        );
 
         if (!attendanceRecord) {
             return res.status(400).json({ message: 'Cannot punch out without punching in first' });
-        }
-
-        if (attendanceRecord.checkOut) {
-            return res.status(400).json({ message: 'Already punched out for today' });
         }
 
         attendanceRecord.checkOut = new Date().toLocaleTimeString('en-IN', { hour12: false });
@@ -219,13 +230,19 @@ exports.getTodaysAttendance = async (req, res) => {
             const attendanceRecord = user.attendance.find(att => att.date === today);
 
             if (attendanceRecord) {
+                let status = attendanceRecord.status;
+
+                if (status === 'Present') {
+                    status = (attendanceRecord.checkOut && attendanceRecord.checkOut !== '--') ? 'Present' : 'Punched In';
+                }
+
                 return {
                     employeeName: user.name,
                     role: user.role,
                     date: today,
                     checkIn: attendanceRecord.checkIn,
                     checkOut: attendanceRecord.checkOut,
-                    status: attendanceRecord.checkOut ? 'Present' : 'Punched In'
+                    status: status
                 };
             } else {
                 return {
@@ -253,5 +270,73 @@ exports.getHrSalaryHistory = async (req, res) => {
         res.json(hr.salaryHistory);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching HR salary history' });
+    }
+};
+
+// Manually Mark Attendance
+exports.manualMarkAttendance = async (req, res) => {
+    const { employeeId, date, status } = req.body;
+
+    try {
+        const employee = await Employee.findById(employeeId);
+        if (!employee) {
+            return res.status(404).json({ message: 'Employee not found.' });
+        }
+
+        const attendanceRecord = employee.attendance.find(att => att.date === date);
+
+        if (attendanceRecord) {
+            // If record exists, update status and clear times
+            attendanceRecord.status = status;
+            attendanceRecord.checkIn = '--';
+            attendanceRecord.checkOut = '--';
+        } else {
+            // If no record, create a new one
+            employee.attendance.push({
+                date,
+                status,
+                checkIn: '--',
+                checkOut: '--'
+            });
+        }
+
+        await employee.save();
+        res.status(200).json(employee.attendance);
+    } catch (error) {
+        res.status(500).json({ message: 'Error marking attendance' });
+    }
+};
+
+// Get Attendance Sheet Data
+exports.getAttendanceSheet = async (req, res) => {
+    try {
+        const employees = await Employee.find({}).select('name attendance');
+        const dateSet = new Set();
+        
+        // First, collect all unique dates from all attendance records
+        employees.forEach(emp => {
+            emp.attendance.forEach(att => {
+                dateSet.add(att.date);
+            });
+        });
+
+        const allDates = Array.from(dateSet).sort((a, b) => new Date(b) - new Date(a));
+
+        const attendanceSheet = employees.map(emp => {
+            const attendanceByDate = emp.attendance.reduce((acc, att) => {
+                acc[att.date] = att.status;
+                return acc;
+            }, {});
+
+            return {
+                employeeId: emp._id,
+                employeeName: emp.name,
+                attendance: attendanceByDate
+            };
+        });
+
+        res.json({ dates: allDates, sheet: attendanceSheet });
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching attendance sheet data' });
     }
 };

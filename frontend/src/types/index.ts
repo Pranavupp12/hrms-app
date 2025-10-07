@@ -1,9 +1,9 @@
 // src/types/index.ts
 export type LeaveStatus = "Pending" | "Approved" | "Rejected";
 
-export type PunchStatus = 'punched-out' | 'punched-in' | 'completed';
+export type PunchStatus = 'punched-out' | 'punched-in' | 'completed' |  'absent';
 
-export type AttendanceStatus = "Present" | "Absent" | "On Leave" | "Punched In" | "Not Punched In" ;
+export type AttendanceStatus = "Present" | "Absent" | "Punched In" | "Not Punched In" | "Sick Leave" | "Paid Leave" | "Short Leave" | "Half Day"; 
 
 export interface LeaveRequest {
   _id: string;
@@ -27,13 +27,22 @@ export interface AppNotification {
 }
 
 export interface Salary {
+  _id: string;
+  id: string;
   month: string;
-  amount: number;
-  status: "Paid" | "Pending";
+  amount: number; // Net Salary
+  grossSalary?: number;
+  deductions?: number;
+  workedDays?: number;
+  status: string;
   date?: string;
+  employeeName?: string;
+  slipPath?: string;
 }
 
+
 export interface Attendance {
+  _id:string
   date: string;
   checkIn: string;
   checkOut: string;
@@ -58,6 +67,8 @@ export interface Employee {
   salaryHistory: Salary[];
   leaveRequests: LeaveRequest[];
   notifications: AppNotification[]; 
+  additionalDetails?: AdditionalDetails;
+  baseSalary?: number;
 }
 
 export interface SentNotification {
@@ -70,4 +81,37 @@ export interface SentNotification {
     role: string;
   };
   sentAt: string;
+}
+
+export const manualAttendanceStatuses: AttendanceStatus[] = [
+  "Absent", 
+  "Sick Leave", 
+  "Paid Leave", 
+  "Short Leave", 
+  "Half Day"
+];
+
+export type AttendanceSheetData = {
+    employeeId: string;
+    employeeName: string;
+    attendance: {
+        [date: string]: AttendanceStatus;
+    };
+};
+
+export interface FileData {
+  path: string;
+  originalName: string;
+}
+
+export interface AdditionalDetails {
+  personalEmail?: string;
+  reuploadAccess?: string[];
+  tenthMarksheet?: FileData;
+  twelfthMarksheet?: FileData;
+  resume?: FileData;
+  panCardFront?: FileData;
+  aadharCardFront?: FileData;
+  aadharCardBack?: FileData;
+  cancelledCheque?: FileData;
 }

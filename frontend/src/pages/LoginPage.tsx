@@ -75,8 +75,8 @@ export function LoginPage() {
               <div className="space-y-2">
                 <div>
                   <p className="font-semibold">Admin:</p>
-                  <p>Email: <span className="font-mono">admin@example.com</span></p>
-                  <p>Password: <span className="font-mono">password123</span></p>
+                  <p>Email: <span className="font-mono">rahuladmin@gmail.com</span></p>
+                  <p>Password: <span className="font-mono">pass123</span></p>
                 </div>
                 <div>
                   <p className="font-semibold">Employee:</p>

@@ -22,4 +22,4 @@ const run = async () => {
 run();
 
 //function to mark absentees manually without cron job
-// Usage: node backend/run-absentee-job.js
+// Usage: node run-absentee-job.js

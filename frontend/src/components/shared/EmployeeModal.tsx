@@ -26,6 +26,7 @@ export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = 
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("Employee");
   const [file, setFile] = useState<File | null>(null);
+  const [baseSalary, setBaseSalary] = useState<number | ''>('');
 
   const isEditMode = employee !== null;
 
@@ -34,13 +35,15 @@ export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = 
       setName(employee.name);
       setEmail(employee.email);
       setRole(employee.role);
-      setPassword(''); 
+      setPassword('');
+      setBaseSalary(employee.baseSalary || '');
     } else {
       setName('');
       setEmail('');
       setPassword('');
       setRole('Employee');
       setFile(null);
+      setBaseSalary('');
     }
   }, [employee, isOpen]);
 
@@ -61,7 +64,7 @@ export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = 
     if (file) {
       formData.append('file', file);
     }
-    
+    formData.append('baseSalary', String(baseSalary));
     onSubmit(formData);
   };
 
@@ -71,7 +74,7 @@ export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = 
         <DialogHeader>
           <DialogTitle>{viewMode ? 'Employee Details' : (isEditMode ? "Update Employee" : "Add New Employee")}</DialogTitle>
         </DialogHeader>
-        
+
         {viewMode && employee ? (
           // --- VIEW ONLY LAYOUT ---
           <div className="grid gap-3 py-4 text-sm">
@@ -88,10 +91,14 @@ export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = 
               <p className="col-span-2 text-muted-foreground">{employee.role}</p>
             </div>
             <div className="grid grid-cols-3 items-center gap-4">
-               <Label className="text-right font-semibold">File : </Label>
-               <p className="col-span-2 text-muted-foreground">
-                 {employee.fileName || (employee.filePath ? employee.filePath.split(/[\\/]/).pop() : 'No file uploaded.')}
-               </p>
+              <Label className="text-right font-semibold">Base Salary (Monthly):</Label>
+               <p className="col-span-2 text-muted-foreground">{employee.baseSalary}</p>
+            </div>
+            <div className="grid grid-cols-3 items-center gap-4">
+              <Label className="text-right font-semibold">File : </Label>
+              <p className="col-span-2 text-muted-foreground">
+                {employee.fileName || (employee.filePath ? employee.filePath.split(/[\\/]/).pop() : 'No file uploaded.')}
+              </p>
             </div>
             <Button onClick={onClose} className="mt-4 w-full">Close</Button>
           </div>
@@ -119,11 +126,15 @@ export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = 
               </select>
             </div>
             <div className="grid gap-2">
+              <Label htmlFor="baseSalary">Base Salary (Monthly)</Label>
+              <Input id="baseSalary" type="number" value={baseSalary} onChange={(e) => setBaseSalary(Number(e.target.value))} />
+            </div>
+            <div className="grid gap-2">
               <Label htmlFor="file">Employee File (Optional)</Label>
               <Input id="file" type="file" onChange={(e) => setFile(e.target.files ? e.target.files[0] : null)} />
               {isEditMode && employee?.filePath && (
                 <div className="text-sm mt-2">
-                  Current File: 
+                  Current File:
                   <span className="text-muted-foreground ml-1">
                     {employee.fileName || employee.filePath.split(/[\\/]/).pop()}
                   </span>

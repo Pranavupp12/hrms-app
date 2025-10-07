@@ -33,6 +33,9 @@ router.get('/attendance/today', hrController.getTodaysAttendance);
 router.get('/:id/attendance', hrController.getHrAttendance);
 router.post('/:id/punch-in', hrController.hrPunchIn);
 router.post('/:id/punch-out', hrController.hrPunchOut);
+router.put('/attendance/manual-mark', hrController.manualMarkAttendance);
+router.get('/attendance-sheet', hrController.getAttendanceSheet);
+
 
 // Salary History
 router.get('/:id/salaries', hrController.getHrSalaryHistory);
