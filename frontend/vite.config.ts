@@ -10,4 +10,8 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    // This is the same as the --host flag, ensuring it's exposed
+    host: true, 
+  },
 })

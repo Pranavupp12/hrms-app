@@ -57,8 +57,9 @@ export function ApplyLeaveModal({ onSubmit, children }: ApplyLeaveModalProps) {
             <SelectTrigger><SelectValue placeholder="Select Leave Type" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="Sick Leave">Sick Leave</SelectItem>
-              <SelectItem value="Annual Leave">Annual Leave</SelectItem>
-              <SelectItem value="Emergency Leave">Emergency Leave</SelectItem>
+              <SelectItem value="Paid Leave">Paid Leave</SelectItem>
+              <SelectItem value="Short Leave">Short Leave</SelectItem>
+              <SelectItem value="Half Day">Half Day</SelectItem>
             </SelectContent>
           </Select>
           <Popover>

@@ -35,9 +35,12 @@ exports.updateDetails = async (req, res) => {
             for (const field of fieldsToUpdate) {
                 if (!details[field] || reuploadAccess.includes(field)) {
                     const file = req.files[field][0];
+                    
+                    // ✅ Store the Cloudinary URL and public_id
                     details[field] = {
-                        path: file.path,
-                        originalName: file.originalname
+                        path: file.path,           // This is now the secure Cloudinary URL
+                        originalName: file.originalname,
+                        public_id: file.filename,  // This is the Cloudinary public_id
                     };
                     
                     const index = reuploadAccess.indexOf(field);
@@ -47,7 +50,6 @@ exports.updateDetails = async (req, res) => {
                 }
             }
             details.reuploadAccess = reuploadAccess;
-            // Mark as modified if it's an existing document
             if (!details.isNew) {
               details.markModified('reuploadAccess');
             }

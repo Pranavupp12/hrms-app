@@ -66,3 +66,20 @@
     @apply bg-background text-foreground;
   }
 }
+
+
+day-with-event {
+  position: relative;
+}
+
+.day-with-event::after {
+  content: '';
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: hsl(47.9 95.8% 53.1%); /* This is a yellow-500 color */
+}

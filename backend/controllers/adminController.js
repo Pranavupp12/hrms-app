@@ -6,6 +6,7 @@ const autoTable = require('jspdf-autotable').default;
 const fs = require('fs');
 const path = require('path');
 const AdditionalDetails = require('../models/AdditionalDetails');
+const bcrypt = require('bcryptjs');
 
 // Fetch all employees
 exports.getAllEmployees = async (req, res) => {
@@ -22,10 +23,14 @@ exports.getAllEmployees = async (req, res) => {
 exports.addEmployee = async (req, res) => {
     const { name, email, password, role, baseSalary } = req.body;
     try {
+
+        const salt = await bcrypt.genSalt(10); // Generate a salt
+        const hashedPassword = await bcrypt.hash(password, salt); // Create the hash
+
         const newEmployeeData = {
             name,
             email,
-            password,
+            password:hashedPassword,
             role: role || 'Employee',
             filePath: req.file ? req.file.path : null,
             fileName: req.file ? req.file.originalname : null,
@@ -46,7 +51,8 @@ exports.updateEmployee = async (req, res) => {
         const updateData = { name, email, role, baseSalary };
 
         if (password) {
-            updateData.password = password;
+            const salt = await bcrypt.genSalt(10);
+            updateData.password = await bcrypt.hash(password, salt);
         }
 
         if (req.file) {

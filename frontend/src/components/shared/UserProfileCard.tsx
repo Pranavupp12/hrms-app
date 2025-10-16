@@ -1,8 +1,6 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { useNavigate } from "react-router-dom";
 
 interface UserProfileCardProps {
   user: {
@@ -14,25 +12,19 @@ interface UserProfileCardProps {
 }
 
 export function UserProfileCard({ user }: UserProfileCardProps) {
-  const navigate = useNavigate();
-
   return (
-    <Card className="mt-15 mx-5">
-      <CardContent className="p-6 flex flex-col items-center text-center m-1">
-        <Avatar className="h-16 w-16 mb-2">
+    <Card className="mt-auto border-none shadow-none bg-indigo-200">
+      <CardContent className="p-4 flex items-center space-x-4">
+        <Avatar className="h-16 w-16">
           <AvatarImage src={`https://api.dicebear.com/7.x/initials/svg?seed=${user.name}`} alt={user.name} />
           <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
         </Avatar>
-        <p className="font-semibold">{user.name}</p>
-        <p className="text-xs text-muted-foreground">{user.email}</p>
-        <Badge className="mt-2">{user.role}</Badge>
-        <Button
-          variant="link"
-          className="mt-2 p-0 h-auto"
-          onClick={() => navigate(`/details/${user.id}`)}
-        >
-          Additional Details
-        </Button>
+
+        <div className="flex flex-col items-start text-left">
+          <p className="font-semibold text-base">{user.name}</p>
+          <p className="text-sm text-muted-foreground pt-0.5">{user.email}</p>
+          <Badge className="mt-2 ">{user.role}</Badge>
+        </div>
       </CardContent>
     </Card>
   );

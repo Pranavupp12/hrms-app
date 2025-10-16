@@ -12,6 +12,7 @@ const adminRoutes = require('./routes/adminRoutes');
 const hrRoutes = require('./routes/hrRoutes');
 const authRoutes = require('./routes/authRoutes');
 const detailsRoutes = require('./routes/detailsRoutes');
+const eventRoutes = require('./routes/eventRoutes');
 
 const app = express();
 const PORT = 5001;
@@ -42,6 +43,7 @@ app.use('/api/employees', employeeRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/hr', hrRoutes);
 app.use('/api/details', detailsRoutes);
+app.use('/api/events', eventRoutes);
 
 // this line to serve the 'slips' folder as static files
 app.use('/slips', express.static('slips'));
@@ -49,6 +51,6 @@ app.use('/slips', express.static('slips'));
 // Schedule the absent marking job
 scheduleAttendanceJob();
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+app.listen(PORT,'0.0.0.0', () => {
+  console.log(`Server is running on port ${PORT} and exposed to the network`);
 });

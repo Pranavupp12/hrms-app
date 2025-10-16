@@ -23,18 +23,25 @@ import type {
     Attendance,
     AllUserAttendance,
     PunchStatus,
-    Salary
+    Salary,
+    LeaveRequest,
+    Event
 } from "@/types";
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../../api";
-import { Bell, LogOut, Clock, ChevronsUpDown } from "lucide-react";
+import { Bell, LogOut, Clock, ChevronsUpDown,Check, X, Briefcase, Bed, Plane, Slice, CheckCircle, XCircle, FileText } from "lucide-react";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { MarkAttendanceModal } from "../../components/shared/MarkAttendanceModal";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SalarySlipModal } from "../../components/shared/SalarySlipModal";
 import { Sidebar } from "../../components/shared/SideBar";
+import { CalendarDays, Users, Send, DollarSign } from "lucide-react";
+import { AddEventModal } from "@/components/shared/AddEventModal";
+import CalendarComponent from "@/components/shared/AnimatedCalendar"; 
+import { ApplyLeaveModal } from "../../components/shared/ApplyLeaveModal";
+import { ViewCommentModal } from "../../components/shared/ViewCommentModal";
 
 
 // Helper to format date from YYYY-MM-DD to DD/MM/YYYY
@@ -122,8 +129,12 @@ export function HrDashboard() {
     const [isSlipModalOpen, setIsSlipModalOpen] = useState(false);
     const [selectedSlipPath, setSelectedSlipPath] = useState<string | undefined>(undefined);
 
-    const [activeTab, setActiveTab] = useState("attendance");
+    const [activeTab, setActiveTab] = useState("home");
     const [hasUnread, setHasUnread] = useState(false);
+
+    const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+    const [hrEvents, setHrEvents] = useState<Event[]>([]);
+    const [hrLeaveRequests, setHrLeaveRequests] = useState<LeaveRequest[]>([]);
 
 
 
@@ -155,6 +166,8 @@ export function HrDashboard() {
                 hrAttendanceRes,
                 allAttendanceRes,
                 hrSalaryRes,
+                hrEventsRes,
+                hrLeavesRes,
             ] = await Promise.all([
                 api.get("/hr/employees"),
                 api.get("/hr/notifications"),
@@ -162,6 +175,8 @@ export function HrDashboard() {
                 api.get(`/hr/${user.id}/attendance`),
                 api.get(attendanceEndpoint),
                 api.get(`/hr/${user.id}/salaries`),
+                api.get(`/events/${user.id}`),
+                api.get(`/employees/${user.id}/leaves`),
             ]);
 
             setAllEmployees(employeesRes.data);
@@ -170,6 +185,8 @@ export function HrDashboard() {
             setHrAttendance(hrAttendanceRes.data);
             setAllUserAttendance(allAttendanceRes.data);
             setHrSalaryHistory(hrSalaryRes.data);
+            setHrEvents(hrEventsRes.data);
+            setHrLeaveRequests(hrLeavesRes.data);
 
             const today = new Date().toISOString().slice(0, 10);
             const myTodaysAttendance = hrAttendanceRes.data.find((att: any) => att.date === today);
@@ -207,7 +224,11 @@ export function HrDashboard() {
     };
 
     useEffect(() => {
-        if (!user?.id || user.role !== "HR") {
+
+        const token = localStorage.getItem('token');
+        const user = JSON.parse(localStorage.getItem("user") || "{}");
+
+        if (!token || user.role !== "HR") {
             navigate("/login");
             return;
         }
@@ -376,15 +397,108 @@ export function HrDashboard() {
         setIsSlipModalOpen(true);
     };
 
-    const hrTabs = [
-        "Attendance",
-        "Employee Management",
-        "Send Notification",
-        "My Salary"
-    ];
+    const hrAttendanceStats = useMemo(() => {
+        const stats = { presentDays: 0, absentDays: 0, sickLeaveDays: 0, paidLeaveDays: 0, shortLeaveDays: 0, halfDayLeaves: 0, totalDaysInMonth: 0 };
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth();
+        stats.totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+
+        hrAttendance.forEach(att => {
+            const attDate = new Date(att.date);
+            if (attDate.getFullYear() === year && attDate.getMonth() === month) {
+                switch (att.status) {
+                    case 'Present': stats.presentDays++; break;
+                    case 'Absent': stats.absentDays++; break;
+                    case 'Sick Leave': stats.sickLeaveDays++; break;
+                    case 'Paid Leave': stats.paidLeaveDays++; break;
+                    case 'Short Leave': stats.shortLeaveDays++; break;
+                    case 'Half Day': stats.halfDayLeaves++; break;
+                }
+            }
+        });
+        return stats;
+    }, [hrAttendance]);
+
+    const { todaysEvents, upcomingEvents } = useMemo(() => {
+        const todayString = new Date().toISOString().slice(0, 10);
+        const todays = hrEvents.filter(event => event.date.slice(0, 10) === todayString);
+        const upcoming = hrEvents.filter(event => event.date.slice(0, 10) !== todayString);
+        upcoming.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        return { todaysEvents: todays, upcomingEvents: upcoming };
+    }, [hrEvents]);
+
+    const latestHrLeave = useMemo(() => {
+        if (!hrLeaveRequests || hrLeaveRequests.length === 0) return null;
+        return [...hrLeaveRequests].sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
+    }, [hrLeaveRequests]);
+
+    const handleCreateEvent = async (eventData: { title: string; description: string; date: string; time: string }) => {
+    try {
+        // We add the 'employee' field, which is the logged-in HR's user ID
+        await api.post('/events', { ...eventData, employee: user.id });
+        toast.success("Event created successfully!");
+        fetchData(); // Refresh all data to show the new event
+    } catch (error) {
+        toast.error("Failed to create event.");
+    }
+};
+
+const handleMarkEventAsComplete = async (eventId: string) => {
+    try {
+        // Optimistic UI Update: Instantly change the event's status in the UI
+        setHrEvents(prevEvents =>
+            prevEvents.map(event =>
+                event._id === eventId ? { ...event, status: 'completed' } : event
+            )
+        );
+        // Call the backend to make the change permanent
+        await api.put(`/events/${eventId}/status`);
+        toast.success("Event marked as complete!");
+    } catch (error) {
+        toast.error("Failed to update event status.");
+        fetchData(); // On error, refresh data to revert the UI change
+    }
+};
+
+const handleDeleteEvent = async (eventId: string) => {
+    try {
+        // Optimistic UI Update: Instantly remove the event from the UI
+        setHrEvents(prevEvents => prevEvents.filter(event => event._id !== eventId));
+        
+        // Call the backend to delete the event from the database
+        await api.delete(`/events/${eventId}`);
+        toast.success("Event deleted!");
+    } catch (error) {
+        toast.error("Failed to delete event.");
+        fetchData(); // On error, refresh data to revert the UI change
+    }
+};
+
+// ✅ 2. Add the function to handle submitting a new leave request
+    const handleApplyLeave = async (newLeaveRequest: Omit<LeaveRequest, '_id' | 'status' | 'id'>) => {
+        try {
+            await api.post(`/employees/${user.id}/leaves`, newLeaveRequest);
+            toast.success("Leave request submitted successfully!");
+            fetchData(); // Refresh all data to show the new request
+        } catch (error) {
+            toast.error("Failed to submit leave request.");
+        }
+    };
+
+
+
+     const hrTabs = [
+    { name: "Home", icon: Clock },
+    { name: "Attendance", icon: CalendarDays },
+    { name: "Leave Requests", icon: FileText },
+    { name: "Employee Management", icon: Users },
+    { name: "Send Notification", icon: Send },
+    { name: "My Salary", icon: DollarSign }
+  ];
 
     return (
-        <div className="flex h-screen bg-gray-50">
+        <div className="flex h-screen bg-blue-50">
             <EmployeeModal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
@@ -410,12 +524,15 @@ export function HrDashboard() {
                 slipPath={selectedSlipPath}
             />
 
+            <AddEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onSubmit={handleCreateEvent} />
+
+
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex w-full">
                 <Sidebar tabs={hrTabs} user={user} className="w-1/5 border-r" />
 
                 <div className="flex-1 p-8 overflow-y-auto">
                     <div className="flex items-center justify-between mb-8">
-                        <h1 className="text-3xl font-bold">Welcome HR, {user.name}!</h1>
+                        <h1 className="text-3xl font-bold text-indigo-400">Welcome HR, {user.name}!</h1>
                         <div className="flex items-center space-x-2">
                             <Button
                                 variant="ghost"
@@ -425,7 +542,7 @@ export function HrDashboard() {
                             >
                                 <Bell size={28} />
                                 {hasUnread && (
-                                    <span className="absolute top-1 right-1 block h-3 w-3 rounded-full bg-red-500 border-2 border-white" />
+                                    <span className="absolute top-2 right-2 block h-2 w-2 rounded-full bg-indigo-400" />
                                 )}
                             </Button>
                             <Button variant="ghost" size="icon" onClick={handleLogout} className="rounded-full">
@@ -433,14 +550,13 @@ export function HrDashboard() {
                             </Button>
                         </div>
                     </div>
-
-                    <TabsContent value="attendance" className="mt-4 space-y-6">
-                        <Card>
-                            <CardHeader>
+                    <TabsContent value="home" className="mt-4 space-y-6">
+                        <Card className="bg-gradient-to-r from-indigo-400 to-purple-600 text-white">
+                             <CardHeader>
                                 <CardTitle className="flex items-center">
                                     <Clock className="mr-2 h-6 w-6" /> Mark Your Attendance
                                 </CardTitle>
-                                <CardDescription>
+                                <CardDescription className="text-white">
                                     {currentTime.toLocaleDateString("en-GB", {
                                         weekday: "long",
                                         year: "numeric",
@@ -454,22 +570,22 @@ export function HrDashboard() {
                                     {currentTime.toLocaleTimeString("en-US")}
                                 </div>
                                 {hrPunchStatus === "punched-out" && !hasMissedPunchIn && (
-                                    <Button size="lg" className="w-48" onClick={handleHrPunchIn} disabled={!isPunchInWindow}>
+                                    <Button size="lg" className="w-48 bg-green text-white" onClick={handleHrPunchIn} disabled={!isPunchInWindow}>
                                         Punch In
                                     </Button>
                                 )}
 
                                 {hasMissedPunchIn && (
                                     <div className="text-center">
-                                        <p className="text-red-600 font-semibold text-lg">You are Absent</p>
-                                        <p className="text-sm text-muted-foreground">The punch-in window (9 AM - 11 AM) has closed.</p>
+                                        <p className="text-white font-semibold text-lg">You are Absent</p>
+                                        <p className="text-sm text-white text-muted-foreground">The punch-in window (9 AM - 11 AM) has closed.</p>
                                     </div>
                                 )}
 
                                 {hrPunchStatus === "absent" && (
                                     <div className="text-center">
-                                        <p className="text-red-600 font-semibold text-lg">You have been marked Absent</p>
-                                        <p className="text-sm text-muted-foreground">You did not punch in before 11 AM.</p>
+                                        <p className="text-white font-semibold text-lg">You have been marked Absent</p>
+                                        <p className="text-sm text-white text-muted-foreground">You did not punch in before 11 AM.</p>
                                     </div>
                                 )}
 
@@ -479,12 +595,55 @@ export function HrDashboard() {
                                     </Button>
                                 )}
                                 {hrPunchStatus === "completed" && (
-                                    <p className="text-green-600 font-semibold">
+                                    <p className="text-white font-semibold">
                                         Your attendance for today has been completed.
                                     </p>
                                 )}
                             </CardContent>
                         </Card>
+                        <Card>
+                            <CardContent className="grid md:grid-cols-2 gap-6 p-4">
+                                <div className="rounded-md border p-4 flex items-center justify-center"><CalendarComponent  showSelectedDateInfo={false} className="shadow-none p-0 border-0" /></div>
+                                <div className="flex flex-col space-y-4">
+                                    <div className="flex justify-between items-center"><h3 className="font-semibold text-lg">My Events</h3><Button size="default" onClick={() => setIsEventModalOpen(true)}>+ Add Event</Button></div>
+                                    <div>
+                                        <h4 className="font-semibold text-md mb-2 text-gray-800">Today</h4>
+                                        <div className="overflow-y-auto max-h-40 pr-3">{todaysEvents.length > 0 ? <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">{todaysEvents.map(event => ( <div key={event._id} className={`p-3 rounded-lg shadow-sm border flex flex-col h-24 transition-all ${event.status === 'completed' ? 'bg-green-100 border-green-300' : 'bg-blue-100 border-blue-200'}`}><div className="flex justify-between items-start flex-grow"><p className={`font-bold text-sm break-words ${event.status === 'completed' ? 'text-green-800 line-through' : 'text-blue-800'}`}>{event.title}</p><div className="flex items-center space-x-0.5 ml-1 flex-shrink-0">{event.status !== 'completed' && <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600 hover:bg-green-200 hover:text-green-700" onClick={() => handleMarkEventAsComplete(event._id)}><Check size={14}/></Button>}<Button variant="ghost" size="icon" className="h-6 w-6 text-red-600 hover:bg-red-200 hover:text-red-700" onClick={() => handleDeleteEvent(event._id)}><X size={14}/></Button></div></div><p className={`text-xs self-end ${event.status === 'completed' ? 'text-green-600' : 'text-blue-700'}`}>{formatTime(event.time)}</p></div>))}</div> : <p className="text-sm text-muted-foreground text-center py-4">No events for today.</p>}</div>
+                                    </div>
+                                    <div>
+                                        <h4 className="font-semibold text-md mb-2 text-gray-800">Upcoming</h4>
+                                        <div className="overflow-y-auto max-h-40 pr-3">{upcomingEvents.length > 0 ? <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">{upcomingEvents.map(event => ( <div key={event._id} className={`p-3 rounded-lg shadow-sm border flex flex-col h-24 transition-all ${event.status === 'completed' ? 'bg-green-100 border-green-300' : 'bg-yellow-100 border-yellow-200'}`}><div className="flex justify-between items-start flex-grow"><p className={`font-bold text-sm break-words ${event.status === 'completed' ? 'text-green-800 line-through' : 'text-yellow-800'}`}>{event.title}</p><div className="flex items-center space-x-0.5 ml-1 flex-shrink-0"><Button variant="ghost" size="icon" className="h-6 w-6 text-red-600 hover:bg-red-200 hover:text-red-700" onClick={() => handleDeleteEvent(event._id)}><X size={14}/></Button></div></div><p className={`text-xs self-end ${event.status === 'completed' ? 'text-green-600' : 'text-yellow-700'}`}>{formatDate(event.date)}</p></div>))}</div> : <p className="text-sm text-muted-foreground text-center py-4">No upcoming events.</p>}</div>
+                                    </div>
+                                </div>
+                            </CardContent>
+                        </Card>
+                        <div className="space-y-4">
+                            <div className="grid gap-4 md:grid-cols-3">
+                                <Card className="bg-blue-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Total Days</CardTitle><CalendarDays/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.totalDaysInMonth}</div></CardContent></Card>
+                                <Card className="bg-green-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Present</CardTitle><CheckCircle/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.presentDays}</div></CardContent></Card>
+                                <Card className="bg-red-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Absent</CardTitle><XCircle/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.absentDays}</div></CardContent></Card>
+                            </div>
+                            <div className="grid gap-4 md:grid-cols-4">
+                                <Card className="bg-yellow-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Sick Leave</CardTitle><Bed/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.sickLeaveDays}</div></CardContent></Card>
+                                <Card className="bg-indigo-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Paid Leave</CardTitle><Plane/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.paidLeaveDays}</div></CardContent></Card>
+                                <Card className="bg-purple-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Half Day</CardTitle><Slice/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.halfDayLeaves}</div></CardContent></Card>
+                                <Card className="bg-pink-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Short Leave</CardTitle><Briefcase/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.shortLeaveDays}</div></CardContent></Card>
+                            </div>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                            <Card>
+                                <CardHeader><CardTitle>My Applied Leaves</CardTitle></CardHeader>
+                                <CardContent>{hrLeaveRequests.length > 0 ? <ul className="space-y-2">{Object.entries(hrLeaveRequests.reduce((acc, leave) => { acc[leave.type] = (acc[leave.type] || 0) + 1; return acc; }, {} as Record<string, number>)).map(([type, count]) => ( <li key={type} className="flex justify-between"><span>{type}</span><Badge>{count}</Badge></li>))}</ul> : <p className="text-sm text-muted-foreground">No leave requests found.</p>}</CardContent>
+                            </Card>
+                            <Card>
+                                <CardHeader><CardTitle>My Last Leave Application</CardTitle></CardHeader>
+                                <CardContent>{latestHrLeave ? <div className="space-y-2"><div className="flex justify-between"><span className="font-semibold">Type:</span><span>{latestHrLeave.type}</span></div><div className="flex justify-between"><span className="font-semibold">Start Date:</span><span>{formatDate(latestHrLeave.startDate)}</span></div><div className="flex justify-between"><span className="font-semibold">End Date:</span><span>{formatDate(latestHrLeave.endDate)}</span></div><div className="flex justify-between"><span className="font-semibold">Status:</span><Badge>{latestHrLeave.status}</Badge></div></div> : <p className="text-sm text-muted-foreground">No leave applications found.</p>}</CardContent>
+                            </Card>
+                        </div>
+                    </TabsContent>
+
+                    <TabsContent value="attendance" className="mt-4 space-y-6">
+                
                         <Card>
                             <CardHeader>
                                 <CardTitle>My Attendance Record</CardTitle>
@@ -493,6 +652,7 @@ export function HrDashboard() {
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
+                                            <TableHead>S.No</TableHead>
                                             <TableHead>Date</TableHead>
                                             <TableHead>Check-In</TableHead>
                                             <TableHead>Check-Out</TableHead>
@@ -500,8 +660,9 @@ export function HrDashboard() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {hrAttendance.map((att) => (
+                                        {hrAttendance.map((att,index) => (
                                             <TableRow key={`my-att-${att.date}`}>
+                                                <TableCell>{index + 1}</TableCell>
                                                 <TableCell>{formatDate(att.date)}</TableCell>
                                                 <TableCell>{formatTime(att.checkIn || "--")}</TableCell>
                                                 <TableCell>{formatTime(att.checkOut || "--")}</TableCell>
@@ -554,7 +715,7 @@ export function HrDashboard() {
                                             </TableRow>
                                         </TableHeader>
                                         <TableBody>
-                                            {employeeToMark.attendance.map(att => (
+                                            {employeeToMark.attendance.map(att  => (
                                                 <TableRow key={att._id}>
                                                     <TableCell>{formatDate(att.date)}</TableCell>
                                                     <TableCell><Badge>{att.status}</Badge></TableCell>
@@ -583,7 +744,7 @@ export function HrDashboard() {
                                     <CardTitle>All User Attendance</CardTitle>
                                     <div className="space-x-2">
                                         <Button
-                                            size="sm"
+                                            size="default"
                                             variant={
                                                 allAttendanceFilter === "all" ? "default" : "outline"
                                             }
@@ -592,7 +753,7 @@ export function HrDashboard() {
                                             All
                                         </Button>
                                         <Button
-                                            size="sm"
+                                            size="default"
                                             variant={
                                                 allAttendanceFilter === "today" ? "default" : "outline"
                                             }
@@ -607,6 +768,7 @@ export function HrDashboard() {
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
+                                            <TableHead>S.No</TableHead>
                                             <TableHead>User</TableHead>
                                             <TableHead>Role</TableHead>
                                             <TableHead>Date</TableHead>
@@ -620,6 +782,7 @@ export function HrDashboard() {
                                             <TableRow
                                                 key={`${att.employeeName}-${att.date}-${index}`}
                                             >
+                                                <TableCell>{index + 1}</TableCell>
                                                 <TableCell>{att.employeeName}</TableCell>
                                                 <TableCell>
                                                     <Badge variant="secondary">{att.role}</Badge>
@@ -651,6 +814,57 @@ export function HrDashboard() {
                         </Card>
                     </TabsContent>
 
+                     <TabsContent value="leave-requests" className="mt-4">
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between">
+                                <CardTitle>My Leave Requests</CardTitle>
+                                <ApplyLeaveModal onSubmit={handleApplyLeave}>
+                                    <Button>Apply for Leave</Button>
+                                </ApplyLeaveModal>
+                            </CardHeader>
+                            <CardContent>
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>S.No</TableHead>
+                                            <TableHead>Type</TableHead>
+                                            <TableHead>Start Date</TableHead>
+                                            <TableHead>End Date</TableHead>
+                                            <TableHead>Status</TableHead>
+                                            <TableHead>Actions</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {hrLeaveRequests.length > 0 ? (
+                                            hrLeaveRequests.map((req,index) => (
+                                                <TableRow key={req._id}>
+                                                    <TableCell>{index + 1}</TableCell>
+                                                    <TableCell>{req.type}</TableCell>
+                                                    <TableCell>{formatDate(req.startDate)}</TableCell>
+                                                    <TableCell>{formatDate(req.endDate)}</TableCell>
+                                                    <TableCell><Badge variant={req.status === "Pending" ? "default" : req.status === "Approved" ? "default" : "destructive"}>{req.status}</Badge></TableCell>
+                                                    <TableCell>
+                                                        {req.status === 'Rejected' && req.rejectionReason && (
+                                                            <ViewCommentModal reason={req.rejectionReason}>
+                                                                <Button variant="outline" size="sm">View Comment</Button>
+                                                            </ViewCommentModal>
+                                                        )}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))
+                                        ) : (
+                                            <TableRow>
+                                                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                                                    You have not applied for any leave.
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+
                     <TabsContent value="employee-management" className="mt-4">
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between">
@@ -661,6 +875,7 @@ export function HrDashboard() {
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
+                                            <TableHead>S.No</TableHead>
                                             <TableHead>Name</TableHead>
                                             <TableHead>Email</TableHead>
                                             <TableHead>Role</TableHead>
@@ -668,8 +883,9 @@ export function HrDashboard() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {allEmployees.map((emp) => (
+                                        {allEmployees.map((emp,index) => (
                                             <TableRow key={emp._id}>
+                                                <TableCell>{index + 1}</TableCell>
                                                 <TableCell>{emp.name}</TableCell>
                                                 <TableCell>{emp.email}</TableCell>
                                                 <TableCell>
@@ -776,8 +992,8 @@ export function HrDashboard() {
                                 <div className="flex items-center justify-between">
                                     <CardTitle className="flex items-center">Sent Notifications History</CardTitle>
                                     <div className="space-x-2">
-                                        <Button size="sm" variant={sentHistoryFilter === 'all' ? 'default' : 'outline'} onClick={() => setSentHistoryFilter('all')}>All</Button>
-                                        <Button size="sm" variant={sentHistoryFilter === 'today' ? 'default' : 'outline'} onClick={() => setSentHistoryFilter('today')}>Today</Button>
+                                        <Button size="default" variant={sentHistoryFilter === 'all' ? 'default' : 'outline'} onClick={() => setSentHistoryFilter('all')}>All</Button>
+                                        <Button size="default" variant={sentHistoryFilter === 'today' ? 'default' : 'outline'} onClick={() => setSentHistoryFilter('today')}>Today</Button>
                                     </div>
                                 </div>
                             </CardHeader>
@@ -785,6 +1001,7 @@ export function HrDashboard() {
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
+                                            <TableHead>S.No</TableHead>
                                             <TableHead>Date</TableHead>
                                             <TableHead>Time</TableHead>
                                             <TableHead>Message</TableHead>
@@ -793,8 +1010,10 @@ export function HrDashboard() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {filteredSentHistory.map((notif) => (
+                                        {filteredSentHistory.length > 0 ? (
+                                        filteredSentHistory.map((notif,index) => (
                                             <TableRow key={notif._id}>
+                                                <TableCell>{index + 1}</TableCell>
                                                 <TableCell className="whitespace-nowrap">
                                                     {formatDate(notif.date)}
                                                 </TableCell>
@@ -809,7 +1028,11 @@ export function HrDashboard() {
                                                     {notif.sentBy ? `${notif.sentBy.name} (${notif.sentBy.role})` : 'N/A'}
                                                 </TableCell>
                                             </TableRow>
-                                        ))}
+                                        ))) : (  <TableRow>
+                                            <TableCell colSpan={6} className="text-sm text-muted-foreground text-center"> 
+                                            You have no new notifications for this period.
+                                        </TableCell>
+                                        </TableRow>)}
                                     </TableBody>
                                 </Table>
                             </CardContent>
@@ -822,8 +1045,8 @@ export function HrDashboard() {
                                         <Bell className="mr-2 h-5 w-5" /> My Notifications
                                     </CardTitle>
                                     <div className="space-x-2">
-                                        <Button size="sm" variant={notificationFilter === 'all' ? 'default' : 'outline'} onClick={() => setNotificationFilter('all')}>All</Button>
-                                        <Button size="sm" variant={notificationFilter === 'today' ? 'default' : 'outline'} onClick={() => setNotificationFilter('today')}>Today</Button>
+                                        <Button size="default" variant={notificationFilter === 'all' ? 'default' : 'outline'} onClick={() => setNotificationFilter('all')}>All</Button>
+                                        <Button size="default" variant={notificationFilter === 'today' ? 'default' : 'outline'} onClick={() => setNotificationFilter('today')}>Today</Button>
                                     </div>
                                 </div>
                             </CardHeader>
@@ -833,13 +1056,13 @@ export function HrDashboard() {
                                         filteredHrNotifications.map((notification) => (
                                             <div
                                                 key={notification._id}
-                                                className="flex items-start justify-between p-4 rounded-lg border"
+                                                className="flex items-start justify-between p-4 rounded-lg border bg-indigo-50 border-indigo-200"
                                             >
                                                 <div className="flex items-start space-x-4">
                                                     <span
                                                         className={`mt-1.5 h-2 w-2 rounded-full ${notification.status === "unread"
                                                             ? "bg-blue-500"
-                                                            : "bg-gray-300"
+                                                            : "bg-indigo-200"
                                                             }`}
                                                     />
                                                     <div className="flex flex-col">
@@ -902,13 +1125,14 @@ export function HrDashboard() {
                                         <option value="">Filter by Year...</option>
                                         {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
                                     </select>
-                                    <Button variant="outline" size="sm" onClick={() => { setFilterMonth(''); setFilterYear(''); }}>Clear</Button>
+                                    <Button variant="outline" size="default" onClick={() => { setFilterMonth(''); setFilterYear(''); }}>Clear</Button>
                                 </div>
                             </CardHeader>
                             <CardContent>
                                 <Table>
                                     <TableHeader>
                                         <TableRow>
+                                            <TableHead>S.No</TableHead>
                                             <TableHead>Month</TableHead>
                                             <TableHead>Amount</TableHead>
                                             <TableHead>Status</TableHead>
@@ -917,8 +1141,9 @@ export function HrDashboard() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {filteredHrSalaryHistory.map((sal) => (
+                                        {filteredHrSalaryHistory.map((sal,index) => (
                                             <TableRow key={sal.month}>
+                                                <TableCell>{index + 1}</TableCell>
                                                 <TableCell>{sal.month}</TableCell>
                                                 <TableCell>₹{sal.amount.toLocaleString()}</TableCell>
                                                 <TableCell><Badge>{sal.status}</Badge></TableCell>

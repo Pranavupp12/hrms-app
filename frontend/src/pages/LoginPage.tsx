@@ -15,12 +15,17 @@ export function LoginPage() {
   const handleLogin = async () => {
     try {
       const response = await api.post('/auth/login', { email, password });
-      const { user } = response.data;
+      
+      // ✅ 1. Get both the user and the new token from the response
+      const { user, token } = response.data;
 
-      // Store user info in local storage to persist session
+      // ✅ 2. Store BOTH the token and user info in local storage
+      localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
+      
       toast.success('Login successful!');
 
+      // Redirect based on role
       if (user.role === 'Admin') {
         navigate('/admin');
       } else if(user.role === 'HR') {

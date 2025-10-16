@@ -7,6 +7,7 @@ import { useEffect, useState, type ChangeEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../api";
+import { Loader2 } from "lucide-react"; 
 
 // This helper component is now updated to handle both old and new data structures
 const FileInputDisplay = ({
@@ -50,6 +51,7 @@ export function AdditionalDetailsPage() {
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [personalEmail, setPersonalEmail] = useState('');
   const [files, setFiles] = useState<{ [key: string]: File | null }>({});
+  const [isUploading, setIsUploading] = useState(false);
   const navigate = useNavigate();
 
   const fetchDetails = async () => {
@@ -75,6 +77,16 @@ export function AdditionalDetailsPage() {
   };
 
   const handleSubmit = async () => {
+
+    // Prevent API call if nothing has changed
+    if (Object.keys(files).length === 0 && personalEmail === (employee?.additionalDetails?.personalEmail || '')) {
+      toast.info("No new information to save.");
+      return;
+    }
+
+    setIsUploading(true); // ✅ 3. Set loading to true
+    const loadingToastId = toast.loading("Uploading files and saving details...");
+
     const formData = new FormData();
     formData.append('personalEmail', personalEmail);
 
@@ -88,11 +100,16 @@ export function AdditionalDetailsPage() {
       await api.put(`/details/${id}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      toast.success("Additional details updated successfully!");
+      toast.success("Details updated successfully!", { id: loadingToastId });
+      setFiles({});
       fetchDetails(); // Refetch to update the UI
     } catch (error) {
-      toast.error("Failed to update details.");
+      toast.error("Failed to update details.", { id: loadingToastId });
+    } finally {
+      setIsUploading(false); // ✅ 4. Set loading to false in the 'finally' block
+      toast.dismiss(); // Dismiss the loading toast
     }
+
   };
 
   if (!employee) {
@@ -107,7 +124,7 @@ export function AdditionalDetailsPage() {
   const reuploadAccess = details.reuploadAccess || [];
 
   return (
-    <div className="p-8 space-y-6 bg-gray-50">
+    <div className="p-8 space-y-6 bg-blue-50">
       <Button onClick={() => navigate(-1)}>&larr; Back to Dashboard</Button>
       <Card>
         <CardHeader><CardTitle>User Profile</CardTitle></CardHeader>
@@ -128,7 +145,7 @@ export function AdditionalDetailsPage() {
               id="personalEmail" 
               value={personalEmail} 
               onChange={e => setPersonalEmail(e.target.value)} 
-              disabled={!!details.personalEmail}
+              disabled={!!details.personalEmail || isUploading}
             />
           </div>
             
@@ -182,7 +199,16 @@ export function AdditionalDetailsPage() {
             disabled={!!details.cancelledCheque && !reuploadAccess.includes('cancelledCheque')}
           />
 
-          <Button onClick={handleSubmit}>Save Additional Information</Button>
+          <Button onClick={handleSubmit} disabled={isUploading}>
+            {isUploading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Uploading...
+              </>
+            ) : (
+              'Save Additional Information'
+            )}
+          </Button>
         </CardContent>
       </Card>
     </div>
