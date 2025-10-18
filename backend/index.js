@@ -4,6 +4,8 @@ const cors = require('cors');
 require('dotenv').config();
 const path = require('path');
 const { scheduleAttendanceJob } = require('./cron/attendanceMarker');
+const { Server } = require("socket.io");
+const http = require('http');
 
 
 
@@ -19,6 +21,33 @@ const PORT = 5001;
 
 app.use(cors());
 app.use(express.json());
+
+const server = http.createServer(app);
+
+// Initialize Socket.IO with CORS settings
+const io = new Server(server, {
+  cors: {
+    origin:  ["http://localhost:5173", "http://192.168.1.67:5173"], // Your frontend URL
+    methods: ["GET", "POST"]
+  }
+});
+
+// Make the `io` instance available to all your routes/controllers
+app.set('socketio', io);
+
+io.on('connection', (socket) => {
+  console.log('A user connected:', socket.id);
+
+  // Allow users to join a room based on their own user ID
+  socket.on('join_room', (userId) => {
+    socket.join(userId);
+    console.log(`User ${socket.id} joined room ${userId}`);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+  });
+});
 
 // Connect to MongoDB with async/await and try-catch
 const connectDB = async () => {
@@ -49,8 +78,9 @@ app.use('/api/events', eventRoutes);
 app.use('/slips', express.static('slips'));
 
 // Schedule the absent marking job
-scheduleAttendanceJob();
+scheduleAttendanceJob(io);
 
-app.listen(PORT,'0.0.0.0', () => {
-  console.log(`Server is running on port ${PORT} and exposed to the network`);
+// It starts the server that handles BOTH Express and Socket.IO
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server with API and WebSockets running on port ${PORT}`);
 });

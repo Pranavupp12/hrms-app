@@ -7,7 +7,7 @@ import { useEffect, useState, type ChangeEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../api";
-import { Loader2 } from "lucide-react"; 
+import { Loader2 } from "lucide-react";
 
 // This helper component is now updated to handle both old and new data structures
 const FileInputDisplay = ({
@@ -23,24 +23,42 @@ const FileInputDisplay = ({
   onChange: (e: ChangeEvent<HTMLInputElement>) => void;
   disabled: boolean;
 }) => {
-  const getFileName = () => {
-    if (!file) return null;
-    if (typeof file === 'string') {
-      return file.split(/[\\/]/).pop(); // Handle old data (just the path)
+  const getFileInfo = () => {
+    if (!file) {
+      return { name: null, url: null };
     }
-    return file.originalName; // Handle new data (the object)
+    // Handles new Cloudinary data format ({ path: '...', originalName: '...' })
+    if (typeof file === 'object' && file.path) {
+      return { name: file.originalName, url: file.path };
+    }
+    // Handles old data format (just a string, which might be a URL)
+    if (typeof file === 'string') {
+      return { name: file.split(/[\\/]/).pop(), url: file };
+    }
+    return { name: null, url: null };
   };
 
-  const fileName = getFileName();
+  const { name: fileName, url: fileUrl } = getFileInfo();
 
   return (
     <div>
       <Label htmlFor={name}>{label}</Label>
       <Input id={name} name={name} type="file" onChange={onChange} disabled={disabled} />
-      {fileName && (
-        <div className="text-sm mt-2 text-muted-foreground">
+      {fileName && fileUrl ? (
+        <a
+          href={fileUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block text-sm mt-2 text-blue-600 hover:underline cursor-pointer"
+        >
           Current file: {fileName}
-        </div>
+        </a>
+      ) : (
+        fileName && (
+          <div className="text-sm mt-2 text-muted-foreground">
+            Current file: {fileName}
+          </div>
+        )
       )}
     </div>
   );
@@ -135,67 +153,67 @@ export function AdditionalDetailsPage() {
           <div><Label>Employee ID:</Label><p>{employee._id}</p></div>
         </CardContent>
       </Card>
-      
+
       <Card>
         <CardHeader><CardTitle>Upload Additional Information</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div>
             <Label htmlFor="personalEmail">Personal Email</Label>
-            <Input 
-              id="personalEmail" 
-              value={personalEmail} 
-              onChange={e => setPersonalEmail(e.target.value)} 
+            <Input
+              id="personalEmail"
+              value={personalEmail}
+              onChange={e => setPersonalEmail(e.target.value)}
               disabled={!!details.personalEmail || isUploading}
             />
           </div>
-            
-          <FileInputDisplay 
-            label="10th Marksheet" 
-            name="tenthMarksheet" 
-            file={details.tenthMarksheet} 
-            onChange={handleFileChange} 
+
+          <FileInputDisplay
+            label="10th Marksheet"
+            name="tenthMarksheet"
+            file={details.tenthMarksheet}
+            onChange={handleFileChange}
             disabled={!!details.tenthMarksheet && !reuploadAccess.includes('tenthMarksheet')}
           />
-          <FileInputDisplay 
-            label="12th Marksheet" 
-            name="twelfthMarksheet" 
-            file={details.twelfthMarksheet} 
-            onChange={handleFileChange} 
+          <FileInputDisplay
+            label="12th Marksheet"
+            name="twelfthMarksheet"
+            file={details.twelfthMarksheet}
+            onChange={handleFileChange}
             disabled={!!details.twelfthMarksheet && !reuploadAccess.includes('twelfthMarksheet')}
           />
-          <FileInputDisplay 
-            label="Resume" 
-            name="resume" 
-            file={details.resume} 
-            onChange={handleFileChange} 
+          <FileInputDisplay
+            label="Resume"
+            name="resume"
+            file={details.resume}
+            onChange={handleFileChange}
             disabled={!!details.resume && !reuploadAccess.includes('resume')}
           />
-          <FileInputDisplay 
-            label="PAN Card" 
-            name="panCardFront" 
-            file={details.panCardFront} 
-            onChange={handleFileChange} 
+          <FileInputDisplay
+            label="PAN Card"
+            name="panCardFront"
+            file={details.panCardFront}
+            onChange={handleFileChange}
             disabled={!!details.panCardFront && !reuploadAccess.includes('panCardFront')}
           />
-          <FileInputDisplay 
-            label="Aadhaar Card (Front)" 
-            name="aadharCardFront" 
-            file={details.aadharCardFront} 
-            onChange={handleFileChange} 
+          <FileInputDisplay
+            label="Aadhaar Card (Front)"
+            name="aadharCardFront"
+            file={details.aadharCardFront}
+            onChange={handleFileChange}
             disabled={!!details.aadharCardFront && !reuploadAccess.includes('aadharCardFront')}
           />
-          <FileInputDisplay 
-            label="Aadhaar Card (Back)" 
-            name="aadharCardBack" 
-            file={details.aadharCardBack} 
-            onChange={handleFileChange} 
+          <FileInputDisplay
+            label="Aadhaar Card (Back)"
+            name="aadharCardBack"
+            file={details.aadharCardBack}
+            onChange={handleFileChange}
             disabled={!!details.aadharCardBack && !reuploadAccess.includes('aadharCardBack')}
           />
-          <FileInputDisplay 
-            label="Cancelled Cheque" 
-            name="cancelledCheque" 
-            file={details.cancelledCheque} 
-            onChange={handleFileChange} 
+          <FileInputDisplay
+            label="Cancelled Cheque"
+            name="cancelledCheque"
+            file={details.cancelledCheque}
+            onChange={handleFileChange}
             disabled={!!details.cancelledCheque && !reuploadAccess.includes('cancelledCheque')}
           />
 

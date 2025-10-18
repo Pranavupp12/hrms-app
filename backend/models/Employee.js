@@ -44,6 +44,7 @@ const employeeSchema = new Schema({
   attendance: [attendanceSchema],
   fileName: { type: String },
   filePath: { type: String }, 
+  filePublicId: { type: String },
   salaryHistory: [salarySchema],
   leaveRequests: [leaveRequestSchema],
   notifications: [notificationSchema],

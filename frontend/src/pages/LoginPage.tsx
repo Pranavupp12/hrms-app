@@ -31,7 +31,7 @@ export function LoginPage() {
       } else if(user.role === 'HR') {
         navigate('/hr');
       } else {
-        navigate('/dashboard');
+        navigate('/employee');
       }
     } catch (error) {
       toast.error('Login failed. Please check your credentials.');

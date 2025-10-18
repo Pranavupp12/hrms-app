@@ -3,20 +3,24 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import type { PunchStatus, Employee, LeaveRequest, AppNotification, Event } from "@/types";
+import type { PunchStatus, Employee, LeaveRequest, AppNotification, Event, Salary } from "@/types";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ApplyLeaveModal } from "@/components/shared/ApplyLeaveModal";
-import { Bell, LogOut, Clock, Check, X } from "lucide-react";
+import { Bell, LogOut, Check, X, Clock } from "lucide-react";
 import { ViewCommentModal } from "@/components/shared/ViewCommentModal";
 import api from '@/api';
 import { SalarySlipModal } from "../../components/shared/SalarySlipModal";
-import { Sidebar } from "@/components/shared/SideBar";
-import { Calendar, FileText, DollarSign, CalendarDays, CheckCircle, XCircle, Briefcase, Bed, Plane, Slice } from "lucide-react";
+import { Calendar, FileText, DollarSign, CalendarDays, CheckCircle, XCircle, Briefcase, Bed, Plane, Slice, Home } from "lucide-react";
 import CalendarComponent from "@/components/shared/AnimatedCalendar";
 import { AddEventModal } from "@/components/shared/AddEventModal";
+import { MSidebar } from "../../components/shared/modern-side-bar";
+import { socket } from '../../socket';
+import { PaginationControls } from "../../components/shared/PaginationControls";
+import { Separator } from "@/components/ui/separator";
 
+const RECORDS_PER_PAGE = 10;
 
 // Helper functions
 const formatDate = (dateString?: string) => {
@@ -68,6 +72,18 @@ export function EmployeeDashboard() {
 
   const [events, setEvents] = useState<Event[]>([]);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+
+  // ✅ 3. Add state for pagination
+  const [pagination, setPagination] = useState({
+    myAttendance: 1,
+    myLeaveRequests: 1,
+    mySalary: 1,
+    myNotifications: 1,
+  });
+
+  const handlePageChange = (table: keyof typeof pagination, page: number) => {
+    setPagination(prev => ({ ...prev, [table]: page }));
+  };
 
   const currentHour = currentTime.getHours();
   const isPunchInWindow = currentHour >= 9 && currentHour < 11;
@@ -134,16 +150,25 @@ export function EmployeeDashboard() {
     return () => clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
+  // ✅ 1. Get auth data at the top level of the component
+  const token = localStorage.getItem('token');
 
-    if (!token || user.role !== "Employee") {
-      navigate('/login');
-      return;
-    }
+  // ✅ 2. Perform the check BEFORE the main return statement
+  if (!token || !user?.role || user.role !== "Employee") {
+    // useEffect is needed to schedule navigation after the initial render phase
+    useEffect(() => {
+      navigate("/login");
+    }, [navigate]);
+
+    // ✅ 3. Return null to prevent the dashboard from rendering
+    return null;
+  }
+  useEffect(() => {
     fetchData();
-  }, [user.id, navigate, fetchData]);
+  }, [user.id]);
+
+  useEffect(() => { handlePageChange('mySalary', 1); }, [filterYear, filterMonth]);
+  useEffect(() => { handlePageChange('myNotifications', 1); }, [notificationFilter]);
 
   useEffect(() => {
     if (employee?.notifications) {
@@ -155,6 +180,57 @@ export function EmployeeDashboard() {
       }
     }
   }, [employee, notificationFilter]);
+
+  useEffect(() => {
+    // Join a private room for this employee's ID
+    if (user.id) {
+      socket.emit('join_room', user.id);
+    }
+
+    // --- WebSocket Event Listeners for Employee ---
+
+    // 1. Listen for personal notifications sent to this employee
+    const handleNewNotification = (newNotification: AppNotification) => {
+      toast.info(`New notification: ${newNotification.message}`);
+      setEmployee(prev => prev ? { ...prev, notifications: [newNotification, ...prev.notifications] } : null);
+      setHasUnread(true);
+    };
+    socket.on('new_notification', handleNewNotification);
+
+    // 2. Listen for updates to THEIR OWN leave requests
+    const handleLeaveStatusUpdate = (updatedLeaveRequest: LeaveRequest) => {
+      toast.info(`Your leave request status has been updated to "${updatedLeaveRequest.status}"`);
+      // Find and update the specific leave request in the state
+      setEmployee(prev => {
+        if (!prev) return null;
+        const updatedRequests = prev.leaveRequests.map(req =>
+          req._id === updatedLeaveRequest._id ? updatedLeaveRequest : req
+        );
+        return { ...prev, leaveRequests: updatedRequests };
+      });
+    };
+    socket.on('leave_status_updated', handleLeaveStatusUpdate);
+
+    const handleNewSalaryRecord = (newRecord: Salary) => {
+      toast.success("Your new salary slip has been generated!");
+      setEmployee(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          salaryHistory: [newRecord, ...prev.salaryHistory]
+        };
+      });
+    };
+    socket.on('new_salary_record', handleNewSalaryRecord);
+
+
+    // --- Cleanup Listeners ---
+    return () => {
+      socket.off('new_notification', handleNewNotification);
+      socket.off('leave_status_updated', handleLeaveStatusUpdate);
+      socket.off('new_salary_record', handleNewSalaryRecord);
+    };
+  }, [user.id]);
 
 
   const attendanceStats = useMemo(() => {
@@ -204,21 +280,32 @@ export function EmployeeDashboard() {
     return stats;
   }, [employee]);
 
+  // ✅ THIS IS THE CORRECTED LOGIC
   const { todaysEvents, upcomingEvents } = useMemo(() => {
     const todayString = new Date().toISOString().slice(0, 10);
 
+    // Only include events where the date is EXACTLY today
     const todays = events.filter(event => event.date.slice(0, 10) === todayString);
-    const upcoming = events.filter(event => event.date.slice(0, 10) !== todayString);
 
-    // Optional: Sort upcoming events by date
+    // Only include events where the date is strictly IN THE FUTURE
+    const upcoming = events.filter(event => event.date.slice(0, 10) > todayString);
+
+    // Sort upcoming events chronologically
     upcoming.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     return { todaysEvents: todays, upcomingEvents: upcoming };
   }, [events]);
 
+  // ✅ THIS IS THE UPDATED LOGIC
   const latestLeave = useMemo(() => {
-    if (!employee || employee.leaveRequests.length === 0) return null;
-    return employee.leaveRequests.sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
+    if (!employee || !employee.leaveRequests || employee.leaveRequests.length === 0) return null;
+
+    // Sort by the `_id` in descending order
+    return [...employee.leaveRequests].sort((a, b) => {
+      if (a._id > b._id) return -1;
+      if (a._id < b._id) return 1;
+      return 0;
+    })[0];
   }, [employee]);
 
   const filteredSalaryHistory = useMemo(() => {
@@ -243,27 +330,32 @@ export function EmployeeDashboard() {
   }, [employee]);
 
   const handlePunchIn = async () => {
+    setPunchStatus('punched-in');
+    toast.success("Punched in successfully!");
     try {
       await api.post(`/employees/${user.id}/punch-in`);
       fetchData();
-      toast.success("Punched in successfully!");
     } catch (error) {
-      toast.error("Failed to punch in.");
+      toast.error("Failed to punch in. Please try again.");
+      setPunchStatus('punched-out');
     }
   };
 
   const handlePunchOut = async () => {
+    setPunchStatus('completed');
+    toast.info("Punched out successfully!");
     try {
       await api.post(`/employees/${user.id}/punch-out`);
       fetchData();
-      toast.info("Punched out successfully!");
     } catch (error) {
       toast.error("Failed to punch out.");
+      setPunchStatus('punched-in'); // Revert on failure
     }
   };
 
   const handleLogout = () => {
     localStorage.removeItem('user');
+    localStorage.removeItem('token');
     sessionStorage.removeItem('loginNotificationShown');
     toast.success("You have been logged out.");
     navigate('/login');
@@ -347,14 +439,42 @@ export function EmployeeDashboard() {
     }
   };
 
+  // --- PAGINATION DATA SLICING ---
+  
+  const totalMyAttendancePages = Math.ceil((employee?.attendance.length || 0) / RECORDS_PER_PAGE);
+  const paginatedMyAttendance = employee?.attendance.slice(
+      (pagination.myAttendance - 1) * RECORDS_PER_PAGE,
+      pagination.myAttendance * RECORDS_PER_PAGE
+  ) || [];
+
+  const totalMyLeavePages = Math.ceil((employee?.leaveRequests.length || 0) / RECORDS_PER_PAGE);
+  const paginatedMyLeaves = employee?.leaveRequests.slice(
+      (pagination.myLeaveRequests - 1) * RECORDS_PER_PAGE,
+      pagination.myLeaveRequests * RECORDS_PER_PAGE
+  ) || [];
+
+  const totalMySalaryPages = Math.ceil(filteredSalaryHistory.length / RECORDS_PER_PAGE);
+  const paginatedMySalary = filteredSalaryHistory.slice(
+      (pagination.mySalary - 1) * RECORDS_PER_PAGE,
+      pagination.mySalary * RECORDS_PER_PAGE
+  );
+
+  const totalMyNotificationPages = Math.ceil(filteredNotifications.length / RECORDS_PER_PAGE);
+  const paginatedMyNotifications = filteredNotifications.slice(
+      (pagination.myNotifications - 1) * RECORDS_PER_PAGE,
+      pagination.myNotifications * RECORDS_PER_PAGE
+  );
+
+
   const employeeTabs = [
-    { name: "Home", icon: Clock },
-    { name: "Attendance", icon: Calendar },
-    { name: "Leave Requests", icon: FileText },
-    { name: "Salary History", icon: DollarSign },
-    { name: "Notifications", icon: Bell }
+    { name: "Home", icon: Home, value: "home" },
+    { name: "Attendance", icon: Calendar, value: "attendance" },
+    { name: "Leave Requests", icon: FileText, value: "leave-requests" },
+    { name: "Salary History", icon: DollarSign, value: "salary-history" },
+    { name: "Notifications", icon: Bell, value: "notifications" }
   ];
 
+   const monthName = new Date().toLocaleString('default', { month: 'long' });
 
   return (
     <div className="flex h-screen bg-blue-50">
@@ -366,12 +486,18 @@ export function EmployeeDashboard() {
 
       <AddEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onSubmit={handleCreateEvent} />
 
+      <MSidebar
+        tabs={employeeTabs}
+        user={user}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onLogout={handleLogout}
+      />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex w-full">
-        <Sidebar tabs={employeeTabs} user={user} className="w-1/5 border-r" />
         <div className="flex-1 p-8 overflow-y-auto">
           <div className="flex items-center justify-between mb-8">
-            <h1 className="text-3xl font-bold text-indigo-400">Welcome, {employee.name}!</h1>
+            <h1 className="text-4xl font-bold text-indigo-400">Welcome, {employee.name}!</h1>
             <div className="flex items-center space-x-2">
               <Button variant="ghost" size="icon" className="rounded-full relative" onClick={() => setActiveTab('notifications')}>
                 <Bell size={28} />
@@ -387,7 +513,7 @@ export function EmployeeDashboard() {
             {/* 1. MARK ATTENDANCE SECTION */}
             <Card className="bg-gradient-to-r from-indigo-400 to-purple-600 text-white">
               <CardHeader>
-                <CardTitle className="flex items-center">Mark Your Attendance</CardTitle>
+                <CardTitle className="flex items-center"><Clock className="mr-2 h-6 w-6" /> Mark Your Attendance</CardTitle>
                 <CardDescription className="text-white">
                   {currentTime.toLocaleDateString('en-GB', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
                 </CardDescription>
@@ -395,7 +521,7 @@ export function EmployeeDashboard() {
               <CardContent className="flex flex-col items-center space-y-4">
                 <div className="text-6xl font-bold font-mono tracking-wider">{currentTime.toLocaleTimeString('en-US')}</div>
                 {punchStatus === 'punched-out' && !hasMissedPunchIn && (
-                  <Button size="lg" className="w-48 bg-green text-white hover:bg-gray-100" onClick={handlePunchIn} disabled={!isPunchInWindow}>Punch In</Button>
+                  <Button size="lg" className="w-48 bg-green-300 text-white hover:bg-slate-200" onClick={handlePunchIn} disabled={!isPunchInWindow}>Punch In</Button>
                 )}
                 {hasMissedPunchIn && (
                   <div className="text-center">
@@ -421,20 +547,18 @@ export function EmployeeDashboard() {
             {/* 2. CALENDAR AND EVENTS SECTION */}
             <Card>
               <CardContent className="grid md:grid-cols-2 gap-4 p-4">
-                <CalendarComponent
-                  showSelectedDateInfo={false}
-                  className="shadow-md p-4"
-                />
-                <div className="flex flex-col space-y-4">
+                 <div className="rounded-md border p-4 flex items-center justify-center"><CalendarComponent showSelectedDateInfo={false} className="shadow-none p-0 border-0" />
+                 </div>
+                <div className="flex flex-col space-y-6">
                   <div className="flex justify-between items-center">
-                    <h3 className="font-semibold text-lg">My Events</h3>
+                    <h3 className="font-semibold text-2xl">My Events</h3>
                     <Button size="default" onClick={() => setIsEventModalOpen(true)}>+ Add Event</Button>
                   </div>
 
                   {/* Today's Events Section */}
                   <div>
-                    <h4 className="font-semibold text-md mb-2 text-gray-800">Today</h4>
-                    <div className="overflow-y-auto max-h-50 pr-3"> {/* Scroll Container */}
+                    <h4 className="font-semibold text-md mb-2 text-gray-800">Todays</h4>
+                    <div className="overflow-y-auto max-h-40 pr-3"> {/* Scroll Container */}
                       {todaysEvents.length > 0 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                           {todaysEvents.map((event) => (
@@ -476,10 +600,12 @@ export function EmployeeDashboard() {
                     </div>
                   </div>
 
+                  <Separator className="my-2" />
+
                   {/* Upcoming Events Section */}
                   <div>
                     <h4 className="font-semibold text-md mb-2 text-gray-800">Upcoming</h4>
-                    <div className="overflow-y-auto max-h-50 pr-3"> {/* Scroll Container */}
+                    <div className="overflow-y-auto max-h-40 pr-3"> {/* Scroll Container */}
                       {upcomingEvents.length > 0 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                           {upcomingEvents.map((event) => (
@@ -518,6 +644,11 @@ export function EmployeeDashboard() {
 
             {/* 3. ATTENDANCE CARDS SECTION */}
             <div className="space-y-4">
+
+              <h3 className="text-4xl font-semibold text-indigo-400">
+                   {monthName} stats
+              </h3>
+
               {/* First Row */}
               <div className="grid gap-4 md:grid-cols-3">
                 <Card className="bg-blue-100 border-blue-200"><CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2"><CardTitle className="text-lg font-medium">Total Days</CardTitle><CalendarDays className="h-10 w-14 text-muted-foreground" /></CardHeader><CardContent><div className="text-7xl font-regular">{attendanceStats.totalDaysInMonth}</div></CardContent></Card>
@@ -586,9 +717,9 @@ export function EmployeeDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {employee.attendance.map((att, index) => (
+                    {paginatedMyAttendance.map((att, index) => (
                       <TableRow key={att.date}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{((pagination.myAttendance - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                         <TableCell>{formatDate(att.date)}</TableCell>
                         <TableCell>{formatTime(att.checkIn)}</TableCell>
                         <TableCell>{formatTime(att.checkOut)}</TableCell>
@@ -600,6 +731,7 @@ export function EmployeeDashboard() {
                     ))}
                   </TableBody>
                 </Table>
+                <PaginationControls currentPage={pagination.myAttendance} totalPages={totalMyAttendancePages} onPageChange={(page) => handlePageChange('myAttendance', page)} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -625,9 +757,9 @@ export function EmployeeDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {employee.leaveRequests.map((req, index) => (
+                    {paginatedMyLeaves.map((req, index) => (
                       <TableRow key={req._id}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{((pagination.myLeaveRequests - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                         <TableCell>{req.type}</TableCell>
                         <TableCell>{formatDate(req.startDate)}</TableCell>
                         <TableCell>{formatDate(req.endDate)}</TableCell>
@@ -643,6 +775,7 @@ export function EmployeeDashboard() {
                     ))}
                   </TableBody>
                 </Table>
+                <PaginationControls currentPage={pagination.myLeaveRequests} totalPages={totalMyLeavePages} onPageChange={(page) => handlePageChange('myLeaveRequests', page)} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -676,24 +809,32 @@ export function EmployeeDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredSalaryHistory.map((sal, index) => (
-                      <TableRow key={sal._id}>
-                        <TableCell>{index + 1}</TableCell>
-                        <TableCell>{sal.month}</TableCell>
-                        <TableCell>₹{sal.amount.toLocaleString()}</TableCell>
-                        <TableCell><Badge>{sal.status}</Badge></TableCell>
-                        <TableCell>{formatDate(sal.date)}</TableCell>
-                        <TableCell>
-                          {sal.slipPath && (
-                            <Button variant="outline" size="sm" onClick={() => openSlipModal(sal.slipPath!)}>
-                              View Slip
-                            </Button>
-                          )}
+                    {paginatedMySalary.length > 0 ? (
+                      paginatedMySalary.map((sal, index) => (
+                        <TableRow key={sal._id}>
+                          <TableCell>{((pagination.mySalary - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
+                          <TableCell>{sal.month}</TableCell>
+                          <TableCell>₹{sal.amount.toLocaleString()}</TableCell>
+                          <TableCell><Badge>{sal.status}</Badge></TableCell>
+                          <TableCell>{formatDate(sal.date)}</TableCell>
+                          <TableCell>
+                            {sal.slipPath && (
+                              <Button variant="outline" size="sm" onClick={() => openSlipModal(sal.slipPath!)}>
+                                View Slip
+                              </Button>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))) : (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground">
+                          No Salary history record
                         </TableCell>
                       </TableRow>
-                    ))}
+                    )}
                   </TableBody>
                 </Table>
+                <PaginationControls currentPage={pagination.mySalary} totalPages={totalMySalaryPages} onPageChange={(page) => handlePageChange('mySalary', page)} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -711,8 +852,8 @@ export function EmployeeDashboard() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4 ">
-                  {filteredNotifications.length > 0 ? (
-                    filteredNotifications.map(notification => (
+                  {paginatedMyNotifications.length > 0 ? (
+                    paginatedMyNotifications.map(notification => (
                       <div key={notification._id} className="flex items-start justify-between p-4 rounded-lg border bg-indigo-50 border-indigo-200">
                         <div className="flex items-start space-x-4 ">
                           <span className={`mt-1.5 h-2 w-2 rounded-full ${notification.status === 'unread' ? 'bg-blue-500' : 'bg-indigo-200'}`} />
@@ -735,6 +876,7 @@ export function EmployeeDashboard() {
                     ))
                   ) : <p className="text-sm text-muted-foreground text-center">You have no new notifications for this period.</p>}
                 </div>
+                <PaginationControls currentPage={pagination.myNotifications} totalPages={totalMyNotificationPages} onPageChange={(page) => handlePageChange('myNotifications', page)} />
               </CardContent>
             </Card>
           </TabsContent>

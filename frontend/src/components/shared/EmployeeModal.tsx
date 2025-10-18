@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import type { Employee } from "@/types";
+import { Loader2 } from "lucide-react";
 
 interface EmployeeModalProps {
   isOpen: boolean;
@@ -18,9 +19,10 @@ interface EmployeeModalProps {
   employee: Employee | null;
   viewMode?: boolean;
   isHr?: boolean;
+  isSubmitting?: boolean;
 }
 
-export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = false }: EmployeeModalProps) {
+export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = false,isSubmitting = false }: EmployeeModalProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,6 +39,7 @@ export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = 
       setRole(employee.role);
       setPassword('');
       setBaseSalary(employee.baseSalary || '');
+      setFile(null);
     } else {
       setName('');
       setEmail('');
@@ -92,12 +95,23 @@ export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = 
             </div>
             <div className="grid grid-cols-3 items-center gap-4">
               <Label className="text-right font-semibold">Base Salary (Monthly):</Label>
-               <p className="col-span-2 text-muted-foreground">{employee.baseSalary}</p>
+              <p className="col-span-2 text-muted-foreground">{employee.baseSalary}</p>
             </div>
             <div className="grid grid-cols-3 items-center gap-4">
               <Label className="text-right font-semibold">File : </Label>
               <p className="col-span-2 text-muted-foreground">
-                {employee.fileName || (employee.filePath ? employee.filePath.split(/[\\/]/).pop() : 'No file uploaded.')}
+                {employee.filePath ? (
+                  <a
+                    href={employee.filePath}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    {employee.fileName || 'View File'}
+                  </a>
+                ) : (
+                  'No file uploaded.'
+                )}
               </p>
             </div>
             <Button onClick={onClose} className="mt-4 w-full">Close</Button>
@@ -129,19 +143,33 @@ export function EmployeeModal({ isOpen, onClose, onSubmit, employee, viewMode = 
               <Label htmlFor="baseSalary">Base Salary (Monthly)</Label>
               <Input id="baseSalary" type="number" value={baseSalary} onChange={(e) => setBaseSalary(Number(e.target.value))} />
             </div>
-            <div className="grid gap-2">
+           <div className="grid gap-2">
               <Label htmlFor="file">Employee File (Optional)</Label>
-              <Input id="file" type="file" onChange={(e) => setFile(e.target.files ? e.target.files[0] : null)} />
+              <Input id="file" type="file" onChange={(e) => setFile(e.target.files ? e.target.files[0] : null)} disabled={isSubmitting} />
               {isEditMode && employee?.filePath && (
-                <div className="text-sm mt-2">
-                  Current File:
-                  <span className="text-muted-foreground ml-1">
-                    {employee.fileName || employee.filePath.split(/[\\/]/).pop()}
-                  </span>
-                </div>
+                // ✅ 3. Make the "Current File" text a clickable link
+                <a 
+                  href={employee.filePath}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm mt-2 text-blue-600 hover:underline"
+                >
+                  Current File: {employee.fileName || employee.filePath.split(/[\\/]/).pop()}
+                </a>
               )}
             </div>
-            <Button onClick={handleSubmit}>{isEditMode ? "Save Changes" : "Save Employee"}</Button>
+            
+            {/* ✅ 4. Update button to show loading state */}
+            <Button onClick={handleSubmit} disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                isEditMode ? "Save Changes" : "Save Employee"
+              )}
+            </Button>
           </div>
         )}
       </DialogContent>

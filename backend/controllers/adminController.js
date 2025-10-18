@@ -21,6 +21,7 @@ exports.getAllEmployees = async (req, res) => {
 
 // Add a new employee
 exports.addEmployee = async (req, res) => {
+    const io = req.app.get('socketio');
     const { name, email, password, role, baseSalary } = req.body;
     try {
 
@@ -32,12 +33,21 @@ exports.addEmployee = async (req, res) => {
             email,
             password:hashedPassword,
             role: role || 'Employee',
-            filePath: req.file ? req.file.path : null,
-            fileName: req.file ? req.file.originalname : null,
             baseSalary,
         };
+
+        // ✅ Add Cloudinary file data if a file was uploaded
+        if (req.file) {
+            newEmployeeData.filePath = req.file.path;           // The secure URL from Cloudinary
+            newEmployeeData.fileName = req.file.originalname;  // The original file name
+            newEmployeeData.filePublicId = req.file.filename;  // The Cloudinary public_id
+        }
+        
         const newEmployee = new Employee(newEmployeeData);
         await newEmployee.save();
+
+        io.emit('employee_added', newEmployee);
+
         res.status(201).json(newEmployee);
     } catch (error) {
         res.status(500).json({ message: 'Error adding employee' });
@@ -46,6 +56,7 @@ exports.addEmployee = async (req, res) => {
 
 // Update an employee
 exports.updateEmployee = async (req, res) => {
+    const io = req.app.get('socketio');
     try {
         const { name, email, role, password, baseSalary } = req.body;
         const updateData = { name, email, role, baseSalary };
@@ -64,6 +75,9 @@ exports.updateEmployee = async (req, res) => {
         if (!updatedEmployee) {
             return res.status(404).json({ message: 'Employee not found' });
         }
+        // ✅ Emit the event with the updated employee data
+        io.emit('employee_updated', updatedEmployee);
+
         res.json(updatedEmployee);
     } catch (error) {
         res.status(500).json({ message: 'Error updating employee' });
@@ -72,10 +86,23 @@ exports.updateEmployee = async (req, res) => {
 
 // Delete an employee
 exports.deleteEmployee = async (req, res) => {
+    const io = req.app.get('socketio'); // ✅ 1. Get the io instance
     try {
-        await Employee.findByIdAndDelete(req.params.id);
-        res.json({ message: 'Employee deleted' });
+        const { id } = req.params; // Get the ID before deleting
+        
+        const employeeToDelete = await Employee.findById(id);
+        if (!employeeToDelete) {
+            return res.status(404).json({ message: 'Employee not found' });
+        }
+
+        await employeeToDelete.deleteOne(); // Use deleteOne() on the document
+
+        // ✅ 2. Emit the event with the ID of the deleted employee
+        io.emit('employee_deleted', { id });
+
+        res.json({ message: 'Employee deleted successfully' });
     } catch (error) {
+        console.error("Error deleting employee:", error);
         res.status(500).json({ message: 'Error deleting employee' });
     }
 };
@@ -93,12 +120,17 @@ exports.getAllLeaveRequests = async (req, res) => {
 
 // Approve a leave request
 exports.approveLeaveRequest = async (req, res) => {
+    const io = req.app.get('socketio');
     try {
         const employee = await Employee.findOne({ 'leaveRequests._id': req.params.leaveId });
         if (!employee) return res.status(404).json({ message: 'Leave request not found.' });
         const leaveRequest = employee.leaveRequests.id(req.params.leaveId);
         leaveRequest.status = 'Approved';
         await employee.save();
+
+        // ✅ Emit the event directly to the employee's private room
+        io.to(employee._id.toString()).emit('leave_status_updated', leaveRequest);
+
         res.json(leaveRequest);
     } catch (error) {
         res.status(500).json({ message: 'Error approving leave request' });
@@ -107,6 +139,9 @@ exports.approveLeaveRequest = async (req, res) => {
 
 // Reject a leave request
 exports.rejectLeaveRequest = async (req, res) => {
+
+    const io = req.app.get('socketio');
+
     const { rejectionReason } = req.body;
     try {
         const employee = await Employee.findOne({ 'leaveRequests._id': req.params.leaveId });
@@ -115,6 +150,10 @@ exports.rejectLeaveRequest = async (req, res) => {
         leaveRequest.status = 'Rejected';
         leaveRequest.rejectionReason = rejectionReason;
         await employee.save();
+
+        // ✅ Emit the event directly to the employee's private room
+        io.to(employee._id.toString()).emit('leave_status_updated', leaveRequest);
+
         res.json(leaveRequest);
     } catch (error) {
         res.status(500).json({ message: 'Error rejecting leave request' });
@@ -165,6 +204,9 @@ exports.getSentNotifications = async (req, res) => {
 
 // Send a notification 
 exports.sendNotification = async (req, res) => {
+
+    const io = req.app.get('socketio');
+
     const { recipient, message, senderId } = req.body; // Add senderId
     const newNotification = {
         message,
@@ -174,6 +216,19 @@ exports.sendNotification = async (req, res) => {
     };
 
     try {
+
+        const sender = await Employee.findById(senderId).select('name role');
+        if (!sender) {
+            return res.status(404).json({ message: 'Sender not found.' });
+        }
+
+        // ✅ 2. Create a complete object specifically for the WebSocket event
+        const notificationForSocket = {
+            ...newNotification,
+            _id: new mongoose.Types.ObjectId(), // Generate a temporary ID for the key
+            sentBy: sender.toObject() // Attach the full sender object
+        };
+
         let recipientNames = [];
 
         if (recipient === 'all') {
@@ -208,6 +263,16 @@ exports.sendNotification = async (req, res) => {
         });
 
         await sentNotification.save();
+
+        // ✅ 3. Emit the NEW, populated object via WebSocket
+        if (recipient === 'all') {
+            io.emit('new_notification', notificationForSocket);
+        } else if (Array.isArray(recipient)) {
+            recipient.forEach(userId => {
+                io.to(userId).emit('new_notification', notificationForSocket);
+            });
+        }
+
         res.status(201).json(sentNotification);
     } catch (error) {
         console.error("Error sending notification:", error);
@@ -359,6 +424,7 @@ exports.getAdminAttendance = async (req, res) => {
 
 // Punch In for Admin
 exports.adminPunchIn = async (req, res) => {
+    const io = req.app.get('socketio');
     try {
 
         const now = new Date();
@@ -388,6 +454,18 @@ exports.adminPunchIn = async (req, res) => {
 
         admin.attendance.push(newAttendance);
         await admin.save();
+
+        // ✅ Emit an attendance update event
+        const updatedRecord = {
+            employeeName: admin.name,
+            role: admin.role,
+            date: today,
+            checkIn: newAttendance.checkIn,
+            checkOut: '--',
+            status: 'Punched In'
+        };
+        io.emit('attendance_updated', updatedRecord);
+
         res.status(201).json(admin.attendance);
 
     } catch (error) {
@@ -480,6 +558,9 @@ exports.getAdminSalaryHistory = async (req, res) => {
 
 // Manually Mark Attendance
 exports.manualMarkAttendance = async (req, res) => {
+
+    const io = req.app.get('socketio');
+
     const { employeeId, date, status } = req.body;
 
     try {
@@ -506,6 +587,20 @@ exports.manualMarkAttendance = async (req, res) => {
         }
 
         await employee.save();
+
+        // ✅ 2. Create the payload for the WebSocket event
+        const updatedRecord = {
+            employeeName: employee.name,
+            role: employee.role,
+            date: date,
+            checkIn: '--',
+            checkOut: '--',
+            status: status
+        };
+
+        // ✅ 3. Emit the event to all connected clients
+        io.emit('attendance_updated', updatedRecord);
+
         res.status(200).json(employee.attendance);
     } catch (error) {
         res.status(500).json({ message: 'Error marking attendance' });
@@ -548,6 +643,7 @@ exports.getAttendanceSheet = async (req, res) => {
 
 // Generate Salary Slips for selected employees for a specific month
     exports.generateSalarySlips = async (req, res) => {
+    const io = req.app.get('socketio');
     const { employeeIds, month } = req.body;
     try {
         if (!Array.isArray(employeeIds) || employeeIds.length === 0) {
@@ -665,9 +761,19 @@ exports.getAttendanceSheet = async (req, res) => {
                 slipPath,
             };
 
-                await Employee.findByIdAndUpdate(employee._id, {
-                $push: { salaryHistory: salaryRecord }
-            });
+                // Save the record to the employee's document
+            const updatedEmployee = await Employee.findByIdAndUpdate(
+                employee._id,
+                { $push: { salaryHistory: salaryRecord } },
+                { new: true } // Important: returns the updated document
+            );
+
+            // Get the most recent salary record that was just added
+            const newRecord = updatedEmployee.salaryHistory[updatedEmployee.salaryHistory.length - 1];
+            
+            // ✅ 2. Emit a targeted event ONLY to the specific employee
+            io.to(employee._id.toString()).emit('new_salary_record', newRecord);
+            
         }
 
         res.status(201).json({ message: `Successfully generated salary slips.` });

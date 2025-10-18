@@ -3,6 +3,7 @@
 const mongoose = require('mongoose');
 const Employee = require('../models/Employee');
 const SentNotification = require('../models/SentNotification');
+const bcrypt = require('bcryptjs');
 
 // Fetch all employees
 exports.getAllEmployees = async (req, res) => {
@@ -16,19 +17,34 @@ exports.getAllEmployees = async (req, res) => {
 
 // Add a new employee
 exports.addEmployee = async (req, res) => {
+    const io = req.app.get('socketio');
     const { name, email, password, role, baseSalary } = req.body;
     try {
+
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
         const newEmployeeData = {
             name,
             email,
-            password,
+            password:hashedPassword,
             role: role || 'Employee',
-            filePath: req.file ? req.file.path : null,
-            fileName: req.file ? req.file.originalname : null,
             baseSalary
         };
+
+        // ✅ Add Cloudinary file data if a file was uploaded
+        if (req.file) {
+            newEmployeeData.filePath = req.file.path;           // The secure URL from Cloudinary
+            newEmployeeData.fileName = req.file.originalname;  // The original file name
+            newEmployeeData.filePublicId = req.file.filename;  // The Cloudinary public_id
+        }
+
         const newEmployee = new Employee(newEmployeeData);
         await newEmployee.save();
+        
+        // ✅ Emit the event with the new employee data
+        io.emit('employee_added', newEmployee);
+
         res.status(201).json(newEmployee);
     } catch (error) {
         res.status(500).json({ message: 'Error adding employee' });
@@ -77,6 +93,8 @@ exports.getSentNotifications = async (req, res) => {
 
 // Send a notification
 exports.sendNotification = async (req, res) => {
+    const io = req.app.get('socketio');
+
     const { recipient, message, senderId } = req.body; // Add senderId
     const newNotification = {
         message,
@@ -86,6 +104,19 @@ exports.sendNotification = async (req, res) => {
     };
 
     try {
+        // ✅ 1. Fetch the sender's details to populate the object
+        const sender = await Employee.findById(senderId).select('name role');
+        if (!sender) {
+            return res.status(404).json({ message: 'Sender not found.' });
+        }
+
+        // ✅ 2. Create a complete object specifically for the WebSocket event
+        const notificationForSocket = {
+            ...newNotification,
+            _id: new mongoose.Types.ObjectId(), // Generate a temporary ID for the key
+            sentBy: sender.toObject() // Attach the full sender object
+        };
+
         let recipientNames = [];
 
         if (recipient === 'all') {
@@ -120,6 +151,16 @@ exports.sendNotification = async (req, res) => {
         });
 
         await sentNotification.save();
+
+       // ✅ 3. Emit the NEW, populated object via WebSocket
+        if (recipient === 'all') {
+            io.emit('new_notification', notificationForSocket);
+        } else if (Array.isArray(recipient)) {
+            recipient.forEach(userId => {
+                io.to(userId).emit('new_notification', notificationForSocket);
+            });
+        }
+
         res.status(201).json(sentNotification);
     } catch (error) {
         console.error("Error sending notification:", error);
@@ -157,6 +198,7 @@ exports.getHrAttendance = async (req, res) => {
 
 // Punch In for HR
 exports.hrPunchIn = async (req, res) => {
+    const io = req.app.get('socketio');
     try {
 
         const now = new Date();
@@ -185,6 +227,18 @@ exports.hrPunchIn = async (req, res) => {
 
         hr.attendance.push(newAttendance);
         await hr.save();
+
+        // ✅ Emit an attendance update event
+        const updatedRecord = {
+            employeeName: admin.name,
+            role: admin.role,
+            date: today,
+            checkIn: newAttendance.checkIn,
+            checkOut: '--',
+            status: 'Punched In'
+        };
+        io.emit('attendance_updated', updatedRecord);
+
         res.status(201).json(hr.attendance);
 
     } catch (error) {
@@ -275,6 +329,9 @@ exports.getHrSalaryHistory = async (req, res) => {
 
 // Manually Mark Attendance
 exports.manualMarkAttendance = async (req, res) => {
+
+    const io = req.app.get('socketio');
+
     const { employeeId, date, status } = req.body;
 
     try {
@@ -301,6 +358,20 @@ exports.manualMarkAttendance = async (req, res) => {
         }
 
         await employee.save();
+
+        // ✅ 2. Create the payload for the WebSocket event
+        const updatedRecord = {
+            employeeName: employee.name,
+            role: employee.role,
+            date: date,
+            checkIn: '--',
+            checkOut: '--',
+            status: status
+        };
+
+        // ✅ 3. Emit the event to all connected clients
+        io.emit('attendance_updated', updatedRecord);
+
         res.status(200).json(employee.attendance);
     } catch (error) {
         res.status(500).json({ message: 'Error marking attendance' });

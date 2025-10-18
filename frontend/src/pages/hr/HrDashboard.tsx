@@ -27,22 +27,26 @@ import type {
     LeaveRequest,
     Event
 } from "@/types";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../../api";
-import { Bell, LogOut, Clock, ChevronsUpDown,Check, X, Briefcase, Bed, Plane, Slice, CheckCircle, XCircle, FileText } from "lucide-react";
+import { Bell, LogOut, Clock, ChevronsUpDown, Check, X, Briefcase, Bed, Plane, Slice, CheckCircle, XCircle, FileText, Home, Calendar } from "lucide-react";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { MarkAttendanceModal } from "../../components/shared/MarkAttendanceModal";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SalarySlipModal } from "../../components/shared/SalarySlipModal";
-import { Sidebar } from "../../components/shared/SideBar";
 import { CalendarDays, Users, Send, DollarSign } from "lucide-react";
 import { AddEventModal } from "@/components/shared/AddEventModal";
-import CalendarComponent from "@/components/shared/AnimatedCalendar"; 
+import CalendarComponent from "@/components/shared/AnimatedCalendar";
 import { ApplyLeaveModal } from "../../components/shared/ApplyLeaveModal";
 import { ViewCommentModal } from "../../components/shared/ViewCommentModal";
+import { MSidebar } from "../../components/shared/modern-side-bar";
+import { socket } from '../../socket';
+import { PaginationControls } from "../../components/shared/PaginationControls";
+import { Separator } from "@/components/ui/separator";
 
+const RECORDS_PER_PAGE = 10;
 
 // Helper to format date from YYYY-MM-DD to DD/MM/YYYY
 const formatDate = (dateString?: string) => {
@@ -136,7 +140,21 @@ export function HrDashboard() {
     const [hrEvents, setHrEvents] = useState<Event[]>([]);
     const [hrLeaveRequests, setHrLeaveRequests] = useState<LeaveRequest[]>([]);
 
+    // ✅ 3. Add state to manage pagination for each table
+    const [pagination, setPagination] = useState({
+        myAttendance: 1,
+        allAttendance: 1,
+        sentNotifications: 1,
+        myNotifications: 1,
+        mySalary: 1,
+        myLeaveRequests: 1,
+        employeeManagement: 1,
+        manualMarking: 1,
+    });
 
+    const handlePageChange = (table: keyof typeof pagination, page: number) => {
+        setPagination(prev => ({ ...prev, [table]: page }));
+    };
 
     const employeeToMark = allEmployees.find(emp => emp._id === selectedEmployeeForMarking);
     const currentHour = currentTime.getHours();
@@ -146,6 +164,7 @@ export function HrDashboard() {
     const navigate = useNavigate();
     const user = JSON.parse(localStorage.getItem("user") || "{}");
 
+
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
@@ -153,7 +172,7 @@ export function HrDashboard() {
 
 
 
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         try {
             const attendanceEndpoint = allAttendanceFilter === 'today'
                 ? '/hr/attendance/today'
@@ -221,19 +240,48 @@ export function HrDashboard() {
         } catch (error) {
             toast.error("Failed to fetch dashboard data.");
         }
-    };
+    }, [allAttendanceFilter]);
+
+    // ✅ 4. Add useEffects to reset pagination when filters change
+    useEffect(() => {
+        handlePageChange('allAttendance', 1);
+    }, [allAttendanceFilter]);
 
     useEffect(() => {
+        handlePageChange('sentNotifications', 1);
+    }, [sentHistoryFilter]);
 
+    useEffect(() => {
+        handlePageChange('myNotifications', 1);
+    }, [notificationFilter]);
+
+    useEffect(() => {
+        handlePageChange('mySalary', 1);
+    }, [filterYear, filterMonth]);
+
+    useEffect(() => { handlePageChange('manualMarking', 1); }, [selectedEmployeeForMarking]);
+
+    //  Handles Authentication & Authorization
+    // This runs only once when the component mounts.
+    useEffect(() => {
         const token = localStorage.getItem('token');
         const user = JSON.parse(localStorage.getItem("user") || "{}");
 
-        if (!token || user.role !== "HR") {
+        if (!token || !user?.role || user.role !== "HR") {
             navigate("/login");
-            return;
         }
-        fetchData();
-    }, [user.id, navigate, allAttendanceFilter]);
+    }, [navigate]); // The `Maps` function is stable, so this effect runs once.
+
+
+    // Data Fetching
+    // This runs after the initial auth check and whenever `fetchData` changes (i.e., when its dependency `allAttendanceFilter` changes).
+    useEffect(() => {
+        // Ensure we don't fetch data if the user is about to be redirected.
+        const token = localStorage.getItem('token');
+        if (token) {
+            fetchData();
+        }
+    }, [fetchData]); // This is now a clean and explicit dependency.
 
 
     const filteredHrSalaryHistory = useMemo(() => {
@@ -247,6 +295,7 @@ export function HrDashboard() {
             return yearMatch && monthMatch;
         });
     }, [hrSalaryHistory, filterYear, filterMonth]);
+
 
     const availableYears = useMemo(() => {
         const years = hrSalaryHistory
@@ -263,6 +312,8 @@ export function HrDashboard() {
         return sentNotifications;
     }, [sentNotifications, sentHistoryFilter]);
 
+
+
     useEffect(() => {
         if (notificationFilter === 'today') {
             const today = new Date().toISOString().slice(0, 10);
@@ -273,26 +324,141 @@ export function HrDashboard() {
     }, [hrNotifications, notificationFilter]);
 
     const handleHrPunchIn = async () => {
+
+        setHrPunchStatus('punched-in');
+        toast.success("Punched in successfully!");
+
         try {
             await api.post(`/hr/${user.id}/punch-in`);
-            setHrPunchStatus('punched-in');
-            toast.success("Punched in successfully!");
             fetchData();
+
         } catch (error) {
-            toast.error("Failed to punch in.");
+            toast.error("Failed to punch in. Please try again.");
+            setHrPunchStatus('punched-out');
         }
     };
 
     const handleHrPunchOut = async () => {
+
+        setHrPunchStatus('completed');
+        toast.info("Punched out successfully!");
+
         try {
             await api.post(`/hr/${user.id}/punch-out`);
-            setHrPunchStatus('completed');
-            toast.info("Punched out successfully!");
             fetchData();
         } catch (error) {
             toast.error("Failed to punch out.");
+            setHrPunchStatus('punched-in'); // Revert
         }
     };
+
+    useEffect(() => {
+        // Join a private room for this HR user's ID
+        if (user.id) {
+            socket.emit('join_room', user.id);
+        }
+
+        // --- WebSocket Event Listeners for HR ---
+
+        // use this event when hr has function to approve or reject leave
+        { /*// 1. Listen for new leave requests from any employee
+        const handleNewLeaveRequest = (newRequest: any) => {
+            toast.info(`${newRequest.employeeName} has applied for leave.`);
+            // If HR has a pending leave requests table, update it
+            // For now, we can assume it triggers a refetch or updates a stat
+            fetchData(); // Simplest way to stay in sync
+        };
+        socket.on('new_leave_request', handleNewLeaveRequest);*/}
+
+        // 2. Listen for personal notifications sent to this HR user
+        const handleNewNotification = (newNotification: AppNotification) => {
+            toast.info(`New notification: ${newNotification.message}`);
+            setHrNotifications(prev => [newNotification, ...prev]);
+            setHasUnread(true);
+        };
+        socket.on('new_notification', handleNewNotification);
+
+        // 3. Listen for general attendance updates
+        const handleAttendanceUpdate = (_updatedRecord: AllUserAttendance) => {
+            // If the HR user is on the attendance tab, refresh the data to see the live update
+            if (activeTab === 'attendance') {
+                fetchData();
+            }
+        };
+        socket.on('attendance_updated', handleAttendanceUpdate);
+
+        // ✅ Listen for a new employee being added
+        const handleEmployeeAdded = (newEmployee: Employee) => {
+            toast.info(`A new employee has been added: ${newEmployee.name}`);
+            setAllEmployees(prev => [newEmployee, ...prev]);
+        };
+        socket.on('employee_added', handleEmployeeAdded);
+
+        // ✅ Listen for an employee being updated
+        const handleEmployeeUpdated = (updatedEmployee: Employee) => {
+            toast.info(`${updatedEmployee.name}'s details have been updated.`);
+            setAllEmployees(prev =>
+                prev.map(emp => emp._id === updatedEmployee._id ? updatedEmployee : emp)
+            );
+        };
+        socket.on('employee_updated', handleEmployeeUpdated);
+
+        // ✅ Listen for an employee being deleted
+        const handleEmployeeDeleted = ({ id }: { id: string }) => {
+            // Find the name before removing for a better toast message
+            const deletedEmployee = allEmployees.find(emp => emp._id === id);
+            if (deletedEmployee) {
+                toast.error(`${deletedEmployee.name} has been removed from the system.`);
+            }
+            setAllEmployees(prev => prev.filter(emp => emp._id !== id));
+        };
+        socket.on('employee_deleted', handleEmployeeDeleted);
+
+        const handleNewSalaryRecord = (newRecord: Salary) => {
+            toast.success("Your new salary slip has been generated!");
+            setHrSalaryHistory(prev => [newRecord, ...prev]);
+        };
+        socket.on('new_salary_record', handleNewSalaryRecord);
+
+        // ✅ Listen for the cron job completion event
+        const handleAbsenteesMarked = () => {
+            toast.info("Daily attendance check complete. Absentees have been marked.");
+
+            // Re-fetch all data to ensure the 'All User Attendance' table is up-to-date.
+            // This is the simplest and most reliable way to sync the state.
+            fetchData();
+        };
+        socket.on('absentees_marked', handleAbsenteesMarked);
+
+        // ✅ Listen for updates to the HR'S OWN leave requests
+        const handleLeaveStatusUpdate = (updatedLeaveRequest: LeaveRequest) => {
+            toast.info(`Your leave request status has been updated to "${updatedLeaveRequest.status}"`);
+
+            // Find and update the specific leave request in the HR's personal leave state
+            setHrLeaveRequests(prevRequests =>
+                prevRequests.map(req =>
+                    req._id === updatedLeaveRequest._id ? updatedLeaveRequest : req
+                )
+            );
+        };
+        socket.on('leave_status_updated', handleLeaveStatusUpdate);
+
+
+
+        // --- Cleanup Listeners ---
+        return () => {
+            //socket.off('new_leave_request', handleNewLeaveRequest);
+            socket.off('new_notification', handleNewNotification);
+            socket.off('attendance_updated', handleAttendanceUpdate);
+            socket.off('employee_added', handleEmployeeAdded);
+            socket.off('employee_updated', handleEmployeeUpdated);
+            socket.off('employee_deleted', handleEmployeeDeleted);
+            socket.off('new_salary_record', handleNewSalaryRecord);
+            socket.off('absentees_marked', handleAbsenteesMarked);
+            socket.off('leave_status_updated', handleLeaveStatusUpdate);
+
+        };
+    }, [user.id, activeTab, allEmployees, fetchData]); // Dependencies remain the same
 
     const openAddModal = () => {
         setEditingEmployee(null);
@@ -370,7 +536,8 @@ export function HrDashboard() {
     };
 
     const handleLogout = () => {
-        localStorage.removeItem("user");
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
         sessionStorage.removeItem("loginNotificationShown");
         toast.success("You have been logged out.");
         navigate("/login");
@@ -422,60 +589,74 @@ export function HrDashboard() {
 
     const { todaysEvents, upcomingEvents } = useMemo(() => {
         const todayString = new Date().toISOString().slice(0, 10);
+
+        // ✅ Only include events where the date is EXACTLY today.
+        // This automatically filters out incomplete events from yesterday.
         const todays = hrEvents.filter(event => event.date.slice(0, 10) === todayString);
-        const upcoming = hrEvents.filter(event => event.date.slice(0, 10) !== todayString);
+
+        // ✅ Only include events where the date is strictly GREATER than today.
+        const upcoming = hrEvents.filter(event => event.date.slice(0, 10) > todayString);
+
+        // The rest of the sorting logic remains the same
         upcoming.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
         return { todaysEvents: todays, upcomingEvents: upcoming };
     }, [hrEvents]);
 
     const latestHrLeave = useMemo(() => {
         if (!hrLeaveRequests || hrLeaveRequests.length === 0) return null;
-        return [...hrLeaveRequests].sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
+
+        // Sort by the `_id` in descending order
+        return [...hrLeaveRequests].sort((a, b) => {
+            if (a._id > b._id) return -1;
+            if (a._id < b._id) return 1;
+            return 0;
+        })[0];
     }, [hrLeaveRequests]);
 
     const handleCreateEvent = async (eventData: { title: string; description: string; date: string; time: string }) => {
-    try {
-        // We add the 'employee' field, which is the logged-in HR's user ID
-        await api.post('/events', { ...eventData, employee: user.id });
-        toast.success("Event created successfully!");
-        fetchData(); // Refresh all data to show the new event
-    } catch (error) {
-        toast.error("Failed to create event.");
-    }
-};
+        try {
+            // We add the 'employee' field, which is the logged-in HR's user ID
+            await api.post('/events', { ...eventData, employee: user.id });
+            toast.success("Event created successfully!");
+            fetchData(); // Refresh all data to show the new event
+        } catch (error) {
+            toast.error("Failed to create event.");
+        }
+    };
 
-const handleMarkEventAsComplete = async (eventId: string) => {
-    try {
-        // Optimistic UI Update: Instantly change the event's status in the UI
-        setHrEvents(prevEvents =>
-            prevEvents.map(event =>
-                event._id === eventId ? { ...event, status: 'completed' } : event
-            )
-        );
-        // Call the backend to make the change permanent
-        await api.put(`/events/${eventId}/status`);
-        toast.success("Event marked as complete!");
-    } catch (error) {
-        toast.error("Failed to update event status.");
-        fetchData(); // On error, refresh data to revert the UI change
-    }
-};
+    const handleMarkEventAsComplete = async (eventId: string) => {
+        try {
+            // Optimistic UI Update: Instantly change the event's status in the UI
+            setHrEvents(prevEvents =>
+                prevEvents.map(event =>
+                    event._id === eventId ? { ...event, status: 'completed' } : event
+                )
+            );
+            // Call the backend to make the change permanent
+            await api.put(`/events/${eventId}/status`);
+            toast.success("Event marked as complete!");
+        } catch (error) {
+            toast.error("Failed to update event status.");
+            fetchData(); // On error, refresh data to revert the UI change
+        }
+    };
 
-const handleDeleteEvent = async (eventId: string) => {
-    try {
-        // Optimistic UI Update: Instantly remove the event from the UI
-        setHrEvents(prevEvents => prevEvents.filter(event => event._id !== eventId));
-        
-        // Call the backend to delete the event from the database
-        await api.delete(`/events/${eventId}`);
-        toast.success("Event deleted!");
-    } catch (error) {
-        toast.error("Failed to delete event.");
-        fetchData(); // On error, refresh data to revert the UI change
-    }
-};
+    const handleDeleteEvent = async (eventId: string) => {
+        try {
+            // Optimistic UI Update: Instantly remove the event from the UI
+            setHrEvents(prevEvents => prevEvents.filter(event => event._id !== eventId));
 
-// ✅ 2. Add the function to handle submitting a new leave request
+            // Call the backend to delete the event from the database
+            await api.delete(`/events/${eventId}`);
+            toast.success("Event deleted!");
+        } catch (error) {
+            toast.error("Failed to delete event.");
+            fetchData(); // On error, refresh data to revert the UI change
+        }
+    };
+
+    // ✅ 2. Add the function to handle submitting a new leave request
     const handleApplyLeave = async (newLeaveRequest: Omit<LeaveRequest, '_id' | 'status' | 'id'>) => {
         try {
             await api.post(`/employees/${user.id}/leaves`, newLeaveRequest);
@@ -486,16 +667,45 @@ const handleDeleteEvent = async (eventId: string) => {
         }
     };
 
+    const totalMyAttendancePages = Math.ceil(hrAttendance.length / RECORDS_PER_PAGE);
+    const paginatedMyAttendance = hrAttendance.slice((pagination.myAttendance - 1) * RECORDS_PER_PAGE, pagination.myAttendance * RECORDS_PER_PAGE);
+
+    const totalAllAttendancePages = Math.ceil(allUserAttendance.length / RECORDS_PER_PAGE);
+    const paginatedAllUserAttendance = allUserAttendance.slice((pagination.allAttendance - 1) * RECORDS_PER_PAGE, pagination.allAttendance * RECORDS_PER_PAGE);
+
+    const totalEmployeePages = Math.ceil(allEmployees.length / RECORDS_PER_PAGE);
+    const paginatedEmployees = allEmployees.slice((pagination.employeeManagement - 1) * RECORDS_PER_PAGE, pagination.employeeManagement * RECORDS_PER_PAGE);
+
+    const totalSentNotificationPages = Math.ceil(filteredSentHistory.length / RECORDS_PER_PAGE);
+    const paginatedSentNotifications = filteredSentHistory.slice((pagination.sentNotifications - 1) * RECORDS_PER_PAGE, pagination.sentNotifications * RECORDS_PER_PAGE);
+
+    const totalMyNotificationPages = Math.ceil(filteredHrNotifications.length / RECORDS_PER_PAGE);
+    const paginatedMyNotifications = filteredHrNotifications.slice((pagination.myNotifications - 1) * RECORDS_PER_PAGE, pagination.myNotifications * RECORDS_PER_PAGE);
+
+    const totalMySalaryPages = Math.ceil(filteredHrSalaryHistory.length / RECORDS_PER_PAGE);
+    const paginatedMySalary = filteredHrSalaryHistory.slice((pagination.mySalary - 1) * RECORDS_PER_PAGE, pagination.mySalary * RECORDS_PER_PAGE);
+
+    const totalMyLeavePages = Math.ceil(hrLeaveRequests.length / RECORDS_PER_PAGE);
+    const paginatedMyLeaves = hrLeaveRequests.slice((pagination.myLeaveRequests - 1) * RECORDS_PER_PAGE, pagination.myLeaveRequests * RECORDS_PER_PAGE);
+
+    const totalManualMarkingPages = Math.ceil((employeeToMark?.attendance.length || 0) / RECORDS_PER_PAGE);
+    const paginatedManualMarking = employeeToMark?.attendance.slice(
+        (pagination.manualMarking - 1) * RECORDS_PER_PAGE,
+        pagination.manualMarking * RECORDS_PER_PAGE
+    ) || [];
 
 
-     const hrTabs = [
-    { name: "Home", icon: Clock },
-    { name: "Attendance", icon: CalendarDays },
-    { name: "Leave Requests", icon: FileText },
-    { name: "Employee Management", icon: Users },
-    { name: "Send Notification", icon: Send },
-    { name: "My Salary", icon: DollarSign }
-  ];
+
+    const hrTabs = [
+        { name: "Home", icon: Home, value: "home" },
+        { name: "Attendance", icon: Calendar, value: "attendance" },
+        { name: "Leave Requests", icon: FileText, value: "leave-requests" },
+        { name: "Employee Management", icon: Users, value: "employee-management" },
+        { name: "Send Notification", icon: Send, value: "send-notification" },
+        { name: "My Salary", icon: DollarSign, value: "my-salary" }
+    ];
+
+    const monthName = new Date().toLocaleString('default', { month: 'long' });
 
     return (
         <div className="flex h-screen bg-blue-50">
@@ -526,13 +736,20 @@ const handleDeleteEvent = async (eventId: string) => {
 
             <AddEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onSubmit={handleCreateEvent} />
 
+            <MSidebar
+                tabs={hrTabs}
+                user={user}
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                onLogout={handleLogout}
+            />
+
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex w-full">
-                <Sidebar tabs={hrTabs} user={user} className="w-1/5 border-r" />
 
                 <div className="flex-1 p-8 overflow-y-auto">
                     <div className="flex items-center justify-between mb-8">
-                        <h1 className="text-3xl font-bold text-indigo-400">Welcome HR, {user.name}!</h1>
+                        <h1 className="text-4xl font-bold text-indigo-400">Welcome HR, {user.name}!</h1>
                         <div className="flex items-center space-x-2">
                             <Button
                                 variant="ghost"
@@ -552,7 +769,7 @@ const handleDeleteEvent = async (eventId: string) => {
                     </div>
                     <TabsContent value="home" className="mt-4 space-y-6">
                         <Card className="bg-gradient-to-r from-indigo-400 to-purple-600 text-white">
-                             <CardHeader>
+                            <CardHeader>
                                 <CardTitle className="flex items-center">
                                     <Clock className="mr-2 h-6 w-6" /> Mark Your Attendance
                                 </CardTitle>
@@ -570,7 +787,7 @@ const handleDeleteEvent = async (eventId: string) => {
                                     {currentTime.toLocaleTimeString("en-US")}
                                 </div>
                                 {hrPunchStatus === "punched-out" && !hasMissedPunchIn && (
-                                    <Button size="lg" className="w-48 bg-green text-white" onClick={handleHrPunchIn} disabled={!isPunchInWindow}>
+                                    <Button size="lg" className="w-48 bg-green-300 hover:bg-slate-200 text-white" onClick={handleHrPunchIn} disabled={!isPunchInWindow}>
                                         Punch In
                                     </Button>
                                 )}
@@ -603,37 +820,42 @@ const handleDeleteEvent = async (eventId: string) => {
                         </Card>
                         <Card>
                             <CardContent className="grid md:grid-cols-2 gap-6 p-4">
-                                <div className="rounded-md border p-4 flex items-center justify-center"><CalendarComponent  showSelectedDateInfo={false} className="shadow-none p-0 border-0" /></div>
-                                <div className="flex flex-col space-y-4">
-                                    <div className="flex justify-between items-center"><h3 className="font-semibold text-lg">My Events</h3><Button size="default" onClick={() => setIsEventModalOpen(true)}>+ Add Event</Button></div>
+                                <div className="rounded-md border p-4 flex items-center justify-center"><CalendarComponent showSelectedDateInfo={false} className="shadow-none p-0 border-0" /></div>
+                                <div className="flex flex-col space-y-6">
+                                    <div className="flex justify-between items-center"><h3 className="font-semibold text-2xl">My Events</h3><Button size="default" onClick={() => setIsEventModalOpen(true)}>+ Add Event</Button></div>
                                     <div>
                                         <h4 className="font-semibold text-md mb-2 text-gray-800">Today</h4>
-                                        <div className="overflow-y-auto max-h-40 pr-3">{todaysEvents.length > 0 ? <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">{todaysEvents.map(event => ( <div key={event._id} className={`p-3 rounded-lg shadow-sm border flex flex-col h-24 transition-all ${event.status === 'completed' ? 'bg-green-100 border-green-300' : 'bg-blue-100 border-blue-200'}`}><div className="flex justify-between items-start flex-grow"><p className={`font-bold text-sm break-words ${event.status === 'completed' ? 'text-green-800 line-through' : 'text-blue-800'}`}>{event.title}</p><div className="flex items-center space-x-0.5 ml-1 flex-shrink-0">{event.status !== 'completed' && <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600 hover:bg-green-200 hover:text-green-700" onClick={() => handleMarkEventAsComplete(event._id)}><Check size={14}/></Button>}<Button variant="ghost" size="icon" className="h-6 w-6 text-red-600 hover:bg-red-200 hover:text-red-700" onClick={() => handleDeleteEvent(event._id)}><X size={14}/></Button></div></div><p className={`text-xs self-end ${event.status === 'completed' ? 'text-green-600' : 'text-blue-700'}`}>{formatTime(event.time)}</p></div>))}</div> : <p className="text-sm text-muted-foreground text-center py-4">No events for today.</p>}</div>
+                                        <div className="overflow-y-auto max-h-40 pr-3">{todaysEvents.length > 0 ? <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">{todaysEvents.map(event => (<div key={event._id} className={`p-3 rounded-lg shadow-sm border flex flex-col h-24 transition-all ${event.status === 'completed' ? 'bg-green-100 border-green-300' : 'bg-blue-100 border-blue-200'}`}><div className="flex justify-between items-start flex-grow"><p className={`font-bold text-sm break-words ${event.status === 'completed' ? 'text-green-800 line-through' : 'text-blue-800'}`}>{event.title}</p><div className="flex items-center space-x-0.5 ml-1 flex-shrink-0">{event.status !== 'completed' && <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600 hover:bg-green-200 hover:text-green-700" onClick={() => handleMarkEventAsComplete(event._id)}><Check size={14} /></Button>}<Button variant="ghost" size="icon" className="h-6 w-6 text-red-600 hover:bg-red-200 hover:text-red-700" onClick={() => handleDeleteEvent(event._id)}><X size={14} /></Button></div></div><p className={`text-xs self-end ${event.status === 'completed' ? 'text-green-600' : 'text-blue-700'}`}>{formatTime(event.time)}</p></div>))}</div> : <p className="text-sm text-muted-foreground text-center py-4">No events for today.</p>}</div>
                                     </div>
+                                    <Separator className="my-2" />
                                     <div>
                                         <h4 className="font-semibold text-md mb-2 text-gray-800">Upcoming</h4>
-                                        <div className="overflow-y-auto max-h-40 pr-3">{upcomingEvents.length > 0 ? <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">{upcomingEvents.map(event => ( <div key={event._id} className={`p-3 rounded-lg shadow-sm border flex flex-col h-24 transition-all ${event.status === 'completed' ? 'bg-green-100 border-green-300' : 'bg-yellow-100 border-yellow-200'}`}><div className="flex justify-between items-start flex-grow"><p className={`font-bold text-sm break-words ${event.status === 'completed' ? 'text-green-800 line-through' : 'text-yellow-800'}`}>{event.title}</p><div className="flex items-center space-x-0.5 ml-1 flex-shrink-0"><Button variant="ghost" size="icon" className="h-6 w-6 text-red-600 hover:bg-red-200 hover:text-red-700" onClick={() => handleDeleteEvent(event._id)}><X size={14}/></Button></div></div><p className={`text-xs self-end ${event.status === 'completed' ? 'text-green-600' : 'text-yellow-700'}`}>{formatDate(event.date)}</p></div>))}</div> : <p className="text-sm text-muted-foreground text-center py-4">No upcoming events.</p>}</div>
+                                        <div className="overflow-y-auto max-h-40 pr-3">{upcomingEvents.length > 0 ? <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">{upcomingEvents.map(event => (<div key={event._id} className={`p-3 rounded-lg shadow-sm border flex flex-col h-24 transition-all ${event.status === 'completed' ? 'bg-green-100 border-green-300' : 'bg-yellow-100 border-yellow-200'}`}><div className="flex justify-between items-start flex-grow"><p className={`font-bold text-sm break-words ${event.status === 'completed' ? 'text-green-800 line-through' : 'text-yellow-800'}`}>{event.title}</p><div className="flex items-center space-x-0.5 ml-1 flex-shrink-0"><Button variant="ghost" size="icon" className="h-6 w-6 text-red-600 hover:bg-red-200 hover:text-red-700" onClick={() => handleDeleteEvent(event._id)}><X size={14} /></Button></div></div><p className={`text-xs self-end ${event.status === 'completed' ? 'text-green-600' : 'text-yellow-700'}`}>{formatDate(event.date)}</p></div>))}</div> : <p className="text-sm text-muted-foreground text-center py-4">No upcoming events.</p>}</div>
                                     </div>
                                 </div>
                             </CardContent>
                         </Card>
                         <div className="space-y-4">
+
+                            <h3 className="text-4xl font-semibold text-indigo-400">
+                                {monthName} stats
+                            </h3>
                             <div className="grid gap-4 md:grid-cols-3">
-                                <Card className="bg-blue-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Total Days</CardTitle><CalendarDays/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.totalDaysInMonth}</div></CardContent></Card>
-                                <Card className="bg-green-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Present</CardTitle><CheckCircle/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.presentDays}</div></CardContent></Card>
-                                <Card className="bg-red-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Absent</CardTitle><XCircle/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.absentDays}</div></CardContent></Card>
+                                <Card className="bg-blue-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Total Days</CardTitle><CalendarDays /></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.totalDaysInMonth}</div></CardContent></Card>
+                                <Card className="bg-green-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Present</CardTitle><CheckCircle /></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.presentDays}</div></CardContent></Card>
+                                <Card className="bg-red-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Absent</CardTitle><XCircle /></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.absentDays}</div></CardContent></Card>
                             </div>
                             <div className="grid gap-4 md:grid-cols-4">
-                                <Card className="bg-yellow-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Sick Leave</CardTitle><Bed/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.sickLeaveDays}</div></CardContent></Card>
-                                <Card className="bg-indigo-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Paid Leave</CardTitle><Plane/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.paidLeaveDays}</div></CardContent></Card>
-                                <Card className="bg-purple-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Half Day</CardTitle><Slice/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.halfDayLeaves}</div></CardContent></Card>
-                                <Card className="bg-pink-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Short Leave</CardTitle><Briefcase/></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.shortLeaveDays}</div></CardContent></Card>
+                                <Card className="bg-yellow-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Sick Leave</CardTitle><Bed /></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.sickLeaveDays}</div></CardContent></Card>
+                                <Card className="bg-indigo-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Paid Leave</CardTitle><Plane /></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.paidLeaveDays}</div></CardContent></Card>
+                                <Card className="bg-purple-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Half Day</CardTitle><Slice /></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.halfDayLeaves}</div></CardContent></Card>
+                                <Card className="bg-pink-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Short Leave</CardTitle><Briefcase /></CardHeader><CardContent><div className="text-7xl">{hrAttendanceStats.shortLeaveDays}</div></CardContent></Card>
                             </div>
                         </div>
                         <div className="grid gap-4 md:grid-cols-2">
                             <Card>
                                 <CardHeader><CardTitle>My Applied Leaves</CardTitle></CardHeader>
-                                <CardContent>{hrLeaveRequests.length > 0 ? <ul className="space-y-2">{Object.entries(hrLeaveRequests.reduce((acc, leave) => { acc[leave.type] = (acc[leave.type] || 0) + 1; return acc; }, {} as Record<string, number>)).map(([type, count]) => ( <li key={type} className="flex justify-between"><span>{type}</span><Badge>{count}</Badge></li>))}</ul> : <p className="text-sm text-muted-foreground">No leave requests found.</p>}</CardContent>
+                                <CardContent>{hrLeaveRequests.length > 0 ? <ul className="space-y-2">{Object.entries(hrLeaveRequests.reduce((acc, leave) => { acc[leave.type] = (acc[leave.type] || 0) + 1; return acc; }, {} as Record<string, number>)).map(([type, count]) => (<li key={type} className="flex justify-between"><span>{type}</span><Badge>{count}</Badge></li>))}</ul> : <p className="text-sm text-muted-foreground">No leave requests found.</p>}</CardContent>
                             </Card>
                             <Card>
                                 <CardHeader><CardTitle>My Last Leave Application</CardTitle></CardHeader>
@@ -643,7 +865,7 @@ const handleDeleteEvent = async (eventId: string) => {
                     </TabsContent>
 
                     <TabsContent value="attendance" className="mt-4 space-y-6">
-                
+
                         <Card>
                             <CardHeader>
                                 <CardTitle>My Attendance Record</CardTitle>
@@ -660,9 +882,9 @@ const handleDeleteEvent = async (eventId: string) => {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {hrAttendance.map((att,index) => (
+                                        {paginatedMyAttendance.map((att, index) => (
                                             <TableRow key={`my-att-${att.date}`}>
-                                                <TableCell>{index + 1}</TableCell>
+                                                <TableCell>{((pagination.myAttendance - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                                                 <TableCell>{formatDate(att.date)}</TableCell>
                                                 <TableCell>{formatTime(att.checkIn || "--")}</TableCell>
                                                 <TableCell>{formatTime(att.checkOut || "--")}</TableCell>
@@ -684,6 +906,7 @@ const handleDeleteEvent = async (eventId: string) => {
                                         ))}
                                     </TableBody>
                                 </Table>
+                                <PaginationControls currentPage={pagination.myAttendance} totalPages={totalMyAttendancePages} onPageChange={(page) => handlePageChange('myAttendance', page)} />
                             </CardContent>
                         </Card>
                         <Card>
@@ -706,35 +929,48 @@ const handleDeleteEvent = async (eventId: string) => {
                                 </div>
 
                                 {employeeToMark && (
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>Date</TableHead>
-                                                <TableHead>Status</TableHead>
-                                                <TableHead>Actions</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {employeeToMark.attendance.map(att  => (
-                                                <TableRow key={att._id}>
-                                                    <TableCell>{formatDate(att.date)}</TableCell>
-                                                    <TableCell><Badge>{att.status}</Badge></TableCell>
-                                                    <TableCell>
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            onClick={() => {
-                                                                setMarkingRecord(att);
-                                                                setIsMarkingModalOpen(true);
-                                                            }}
-                                                        >
-                                                            Mark
-                                                        </Button>
-                                                    </TableCell>
+                                    <>
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>S.No</TableHead>
+                                                    <TableHead>Date</TableHead>
+                                                    <TableHead>Status</TableHead>
+                                                    <TableHead>Actions</TableHead>
                                                 </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {paginatedManualMarking.map((att, index) => (
+                                                    <TableRow key={att._id}>
+                                                        <TableCell>{((pagination.manualMarking - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
+                                                        <TableCell>{formatDate(att.date)}</TableCell>
+                                                        <TableCell>
+                                                            <Badge variant={att.status === 'Absent' ? 'destructive' : 'default'}>
+                                                                {att.status}
+                                                            </Badge>
+                                                        </TableCell>
+                                                        <TableCell>
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => {
+                                                                    setMarkingRecord(att);
+                                                                    setIsMarkingModalOpen(true);
+                                                                }}
+                                                            >
+                                                                Mark
+                                                            </Button>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                        <PaginationControls
+                                            currentPage={pagination.manualMarking}
+                                            totalPages={totalManualMarkingPages}
+                                            onPageChange={(page) => handlePageChange('manualMarking', page)}
+                                        />
+                                    </>
                                 )}
                             </CardContent>
                         </Card>
@@ -778,11 +1014,11 @@ const handleDeleteEvent = async (eventId: string) => {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {allUserAttendance.map((att, index) => (
+                                        {paginatedAllUserAttendance.map((att, index) => (
                                             <TableRow
                                                 key={`${att.employeeName}-${att.date}-${index}`}
                                             >
-                                                <TableCell>{index + 1}</TableCell>
+                                                <TableCell>{((pagination.allAttendance - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                                                 <TableCell>{att.employeeName}</TableCell>
                                                 <TableCell>
                                                     <Badge variant="secondary">{att.role}</Badge>
@@ -810,11 +1046,16 @@ const handleDeleteEvent = async (eventId: string) => {
                                         ))}
                                     </TableBody>
                                 </Table>
+                                <PaginationControls
+                                    currentPage={pagination.allAttendance}
+                                    totalPages={totalAllAttendancePages}
+                                    onPageChange={(page) => handlePageChange('allAttendance', page)}
+                                />
                             </CardContent>
                         </Card>
                     </TabsContent>
 
-                     <TabsContent value="leave-requests" className="mt-4">
+                    <TabsContent value="leave-requests" className="mt-4">
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between">
                                 <CardTitle>My Leave Requests</CardTitle>
@@ -835,10 +1076,10 @@ const handleDeleteEvent = async (eventId: string) => {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {hrLeaveRequests.length > 0 ? (
-                                            hrLeaveRequests.map((req,index) => (
+                                        {paginatedMyLeaves.length > 0 ? (
+                                            paginatedMyLeaves.map((req, index) => (
                                                 <TableRow key={req._id}>
-                                                    <TableCell>{index + 1}</TableCell>
+                                                    <TableCell>{((pagination.myLeaveRequests - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                                                     <TableCell>{req.type}</TableCell>
                                                     <TableCell>{formatDate(req.startDate)}</TableCell>
                                                     <TableCell>{formatDate(req.endDate)}</TableCell>
@@ -861,6 +1102,11 @@ const handleDeleteEvent = async (eventId: string) => {
                                         )}
                                     </TableBody>
                                 </Table>
+                                <PaginationControls
+                                    currentPage={pagination.myLeaveRequests}
+                                    totalPages={totalMyLeavePages}
+                                    onPageChange={(page) => handlePageChange('myLeaveRequests', page)}
+                                />
                             </CardContent>
                         </Card>
                     </TabsContent>
@@ -883,9 +1129,9 @@ const handleDeleteEvent = async (eventId: string) => {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {allEmployees.map((emp,index) => (
+                                        {paginatedEmployees.map((emp, index) => (
                                             <TableRow key={emp._id}>
-                                                <TableCell>{index + 1}</TableCell>
+                                                <TableCell>{((pagination.employeeManagement - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                                                 <TableCell>{emp.name}</TableCell>
                                                 <TableCell>{emp.email}</TableCell>
                                                 <TableCell>
@@ -904,6 +1150,11 @@ const handleDeleteEvent = async (eventId: string) => {
                                         ))}
                                     </TableBody>
                                 </Table>
+                                <PaginationControls
+                                    currentPage={pagination.employeeManagement}
+                                    totalPages={totalEmployeePages}
+                                    onPageChange={(page) => handlePageChange('employeeManagement', page)}
+                                />
                             </CardContent>
                         </Card>
                     </TabsContent>
@@ -1010,31 +1261,36 @@ const handleDeleteEvent = async (eventId: string) => {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {filteredSentHistory.length > 0 ? (
-                                        filteredSentHistory.map((notif,index) => (
-                                            <TableRow key={notif._id}>
-                                                <TableCell>{index + 1}</TableCell>
-                                                <TableCell className="whitespace-nowrap">
-                                                    {formatDate(notif.date)}
+                                        {paginatedSentNotifications.length > 0 ? (
+                                            paginatedSentNotifications.map((notif, index) => (
+                                                <TableRow key={notif._id}>
+                                                    <TableCell>{((pagination.sentNotifications - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
+                                                    <TableCell className="whitespace-nowrap">
+                                                        {formatDate(notif.date)}
+                                                    </TableCell>
+                                                    <TableCell className="whitespace-nowrap">
+                                                        {formatSentTime(notif.sentAt)}
+                                                    </TableCell>
+                                                    <TableCell className="max-w-md truncate">
+                                                        {notif.message}
+                                                    </TableCell>
+                                                    <TableCell>{notif.recipient}</TableCell>
+                                                    <TableCell>
+                                                        {notif.sentBy ? `${notif.sentBy.name} (${notif.sentBy.role})` : 'N/A'}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))) : (<TableRow>
+                                                <TableCell colSpan={6} className="text-sm text-muted-foreground text-center">
+                                                    You have no new notifications for this period.
                                                 </TableCell>
-                                                <TableCell className="whitespace-nowrap">
-                                                    {formatSentTime(notif.sentAt)}
-                                                </TableCell>
-                                                <TableCell className="max-w-md truncate">
-                                                    {notif.message}
-                                                </TableCell>
-                                                <TableCell>{notif.recipient}</TableCell>
-                                                <TableCell>
-                                                    {notif.sentBy ? `${notif.sentBy.name} (${notif.sentBy.role})` : 'N/A'}
-                                                </TableCell>
-                                            </TableRow>
-                                        ))) : (  <TableRow>
-                                            <TableCell colSpan={6} className="text-sm text-muted-foreground text-center"> 
-                                            You have no new notifications for this period.
-                                        </TableCell>
-                                        </TableRow>)}
+                                            </TableRow>)}
                                     </TableBody>
                                 </Table>
+                                <PaginationControls
+                                    currentPage={pagination.sentNotifications}
+                                    totalPages={totalSentNotificationPages}
+                                    onPageChange={(page) => handlePageChange('sentNotifications', page)}
+                                />
                             </CardContent>
                         </Card>
 
@@ -1052,8 +1308,8 @@ const handleDeleteEvent = async (eventId: string) => {
                             </CardHeader>
                             <CardContent>
                                 <div className="space-y-4">
-                                    {filteredHrNotifications.length > 0 ? (
-                                        filteredHrNotifications.map((notification) => (
+                                    {paginatedMyNotifications.length > 0 ? (
+                                        paginatedMyNotifications.map((notification) => (
                                             <div
                                                 key={notification._id}
                                                 className="flex items-start justify-between p-4 rounded-lg border bg-indigo-50 border-indigo-200"
@@ -1101,6 +1357,11 @@ const handleDeleteEvent = async (eventId: string) => {
                                         </p>
                                     )}
                                 </div>
+                                <PaginationControls
+                                    currentPage={pagination.myNotifications}
+                                    totalPages={totalMyNotificationPages}
+                                    onPageChange={(page) => handlePageChange('myNotifications', page)}
+                                />
                             </CardContent>
                         </Card>
                     </TabsContent>
@@ -1141,28 +1402,40 @@ const handleDeleteEvent = async (eventId: string) => {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {filteredHrSalaryHistory.map((sal,index) => (
-                                            <TableRow key={sal.month}>
-                                                <TableCell>{index + 1}</TableCell>
-                                                <TableCell>{sal.month}</TableCell>
-                                                <TableCell>₹{sal.amount.toLocaleString()}</TableCell>
-                                                <TableCell><Badge>{sal.status}</Badge></TableCell>
-                                                <TableCell>{formatDate(sal.date)}</TableCell>
-                                                <TableCell>
-                                                    {sal.slipPath && (
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            onClick={() => openSlipModal(sal.slipPath!)}
-                                                        >
-                                                            View Slip
-                                                        </Button>
-                                                    )}
+                                        {paginatedMySalary.length > 0 ? (
+                                            paginatedMySalary.map((sal, index) => (
+                                                <TableRow key={sal.month}>
+                                                    <TableCell>{((pagination.mySalary - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
+                                                    <TableCell>{sal.month}</TableCell>
+                                                    <TableCell>₹{sal.amount.toLocaleString()}</TableCell>
+                                                    <TableCell><Badge>{sal.status}</Badge></TableCell>
+                                                    <TableCell>{formatDate(sal.date)}</TableCell>
+                                                    <TableCell>
+                                                        {sal.slipPath && (
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => openSlipModal(sal.slipPath!)}
+                                                            >
+                                                                View Slip
+                                                            </Button>
+                                                        )}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))) : (
+                                            <TableRow>
+                                                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                                                    No Salary history record
                                                 </TableCell>
                                             </TableRow>
-                                        ))}
+                                        )}
                                     </TableBody>
                                 </Table>
+                                <PaginationControls
+                                    currentPage={pagination.mySalary}
+                                    totalPages={totalMySalaryPages}
+                                    onPageChange={(page) => handlePageChange('mySalary', page)}
+                                />
                             </CardContent>
                         </Card>
                     </TabsContent>

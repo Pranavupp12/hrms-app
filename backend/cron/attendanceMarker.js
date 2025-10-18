@@ -38,6 +38,8 @@ const markAbsentees = async () => {
     await Employee.bulkWrite(bulkOps);
     console.log(`Successfully marked ${bulkOps.length} employees as absent for ${todayString}.`);
 
+    io.emit('absentees_marked');
+
   } catch (error) {
     console.error('Error in cron job while marking absentees:', error);
   }
@@ -47,8 +49,10 @@ const markAbsentees = async () => {
  * Schedules the attendance job to run every day at 11:00 AM India Standard Time.
  * The cron string '0 11 * * *' means: at minute 0 of hour 11, every day.
  */
-const scheduleAttendanceJob = () => {
-  cron.schedule('0 11 * * *', markAbsentees, {
+const scheduleAttendanceJob = (io) => {
+  cron.schedule('0 11 * * *', () => {
+    markAbsentees(io)
+  },{
     timezone: "Asia/Kolkata"
   });
   console.log('Scheduled cron job to mark absentees daily at 11:00 AM IST.');

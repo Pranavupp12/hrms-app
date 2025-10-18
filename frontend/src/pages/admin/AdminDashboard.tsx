@@ -1,3 +1,5 @@
+
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -29,14 +31,13 @@ import type {
   AttendanceSheetData,
   Event
 } from "@/types";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../../api";
 import { MarkAttendanceModal } from "../../components/shared/MarkAttendanceModal";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SalarySlipModal } from "../../components/shared/SalarySlipModal";
-import { Sidebar } from "../../components/shared/SideBar";
 import { ConfirmationModal } from "../../components/shared/ConfirmationModal";
 import { ManageUploadsModal } from "../../components/shared/ManageUploadsModal";
 import { Calendar, FileText, Users, Send, DollarSign, Home, UserCheck } from "lucide-react";
@@ -45,6 +46,12 @@ import { AddEventModal } from "@/components/shared/AddEventModal";
 import CalendarComponent from "@/components/shared/AnimatedCalendar";
 import { ApplyLeaveModal } from "../../components/shared/ApplyLeaveModal";
 import { ViewCommentModal } from "../../components/shared/ViewCommentModal";
+import { MSidebar } from "../../components/shared/modern-side-bar";
+import { socket } from '../../socket';
+import { PaginationControls } from "../../components/shared/PaginationControls";
+import { Separator } from "@/components/ui/separator";
+
+const RECORDS_PER_PAGE = 10;
 
 // Helper to format date from YYYY-MM-DD to DD/MM/YYYY
 const formatDate = (dateString?: string) => {
@@ -157,9 +164,24 @@ export function AdminDashboard() {
   const [adminLeaveRequests, setAdminLeaveRequests] = useState<LeaveRequest[]>([]);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
 
+  // Add state to manage pagination for each table
+  const [pagination, setPagination] = useState({
+    myAttendance: 1,
+    allUserAttendance: 1,
+    manualMarking: 1,
+    attendanceSheet: 1,
+    pendingLeaves: 1,
+    myLeaveRequests: 1,
+    allEmployees: 1,
+    sentNotifications: 1,
+    myNotifications: 1,
+    allSalaryHistory: 1,
+    mySalaryHistory: 1,
+  });
 
-
-
+  const handlePageChange = (table: keyof typeof pagination, page: number) => {
+    setPagination(prev => ({ ...prev, [table]: page }));
+  };
 
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem("user") || "{}");
@@ -170,7 +192,7 @@ export function AdminDashboard() {
   }, []);
 
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const attendanceEndpoint = allAttendanceFilter === 'today'
         ? '/admin/attendance/today'
@@ -245,22 +267,39 @@ export function AdminDashboard() {
     } catch (error) {
       toast.error("Failed to fetch dashboard data.");
     }
-  };
+  }, [allAttendanceFilter]);
 
+  // ✅ 4. Add useEffects to reset pagination when filters change
+  useEffect(() => { handlePageChange('allUserAttendance', 1); }, [allAttendanceFilter]);
+  useEffect(() => { handlePageChange('sentNotifications', 1); }, [sentHistoryFilter]);
+  useEffect(() => { handlePageChange('myNotifications', 1); }, [notificationFilter]);
+  useEffect(() => { handlePageChange('allSalaryHistory', 1); }, [filterYear, filterMonth]);
+  useEffect(() => { handlePageChange('mySalaryHistory', 1); }, [mySalaryFilterYear, mySalaryFilterMonth]);
+  useEffect(() => { handlePageChange('manualMarking', 1); }, [selectedEmployeeForMarking]);
 
-
-
+  // Handles Authentication & Authorization
+  // This runs only once when the component mounts.
   useEffect(() => {
-
     const token = localStorage.getItem('token');
     const user = JSON.parse(localStorage.getItem("user") || "{}");
 
-    if (!token || user.role !== "Admin") {
+    if (!token || !user?.role || user.role !== "Admin") {
       navigate("/login");
-      return;
     }
-    fetchData();
-  }, [user.id, navigate, allAttendanceFilter]);
+  }, [navigate]); // The `Maps` function is stable, so this effect runs once.
+
+
+  // Handles Data Fetching
+  // This runs after the initial auth check and whenever `fetchData` changes (i.e., when its dependency `allAttendanceFilter` changes).
+  useEffect(() => {
+    // Ensure we don't fetch data if the user is about to be redirected.
+    const token = localStorage.getItem('token');
+    if (token) {
+      fetchData();
+    }
+  }, [fetchData]);
+
+
 
   const filteredSalaryHistory = useMemo(() => {
     if (!filterYear && !filterMonth) {
@@ -319,13 +358,16 @@ export function AdminDashboard() {
   }, [adminNotifications, notificationFilter]);
 
   const handleAdminPunchIn = async () => {
+
+    setAdminPunchStatus('punched-in');
+    toast.success("Punched in successfully!");
+
     try {
       await api.post(`/admin/${user.id}/punch-in`);
-      setAdminPunchStatus('punched-in');
-      toast.success("Punched in successfully!");
       fetchData();
     } catch (error) {
-      toast.error("Failed to punch in.");
+      toast.error("Failed to punch in. Please try again.");
+      setAdminPunchStatus('punched-out');
     }
   };
 
@@ -345,15 +387,122 @@ export function AdminDashboard() {
   }, [fetchData]);
 
   const handleAdminPunchOut = async () => {
+    setAdminPunchStatus('completed');
+    toast.info("Punched out successfully!");
     try {
       await api.post(`/admin/${user.id}/punch-out`);
-      setAdminPunchStatus('completed');
-      toast.info("Punched out successfully!");
       fetchData();
     } catch (error) {
       toast.error("Failed to punch out.");
+      setAdminPunchStatus('punched-in'); // Revert
     }
   };
+
+  useEffect(() => {
+    // Join a private room for this admin's user ID
+    if (user.id) {
+      socket.emit('join_room', user.id);
+    }
+
+    // --- WebSocket Event Listeners ---
+
+    // 1. Listen for new leave requests
+    const handleNewLeaveRequest = (newRequest: any) => {
+      toast.info(`${newRequest.employeeName} has applied for leave.`);
+      // Add to the top of the table and update home stats
+      setLeaveRequests(prev => [newRequest, ...prev]);
+    };
+    socket.on('new_leave_request', handleNewLeaveRequest);
+
+    // 2. Listen for personal notifications
+    const handleNewNotification = (newNotification: AppNotification) => {
+      toast.info(`New notification received: ${newNotification.message}`);
+      // Add to the top of the list and update unread status
+      setAdminNotifications(prev => [newNotification, ...prev]);
+      setHasUnread(true);
+    };
+    socket.on('new_notification', handleNewNotification);
+
+    // 3. Listen for attendance updates
+    const handleAttendanceUpdate = (_updatedRecord: AllUserAttendance) => {
+      if (activeTab === 'attendance') {
+        fetchData();
+      }
+    };
+    socket.on('attendance_updated', handleAttendanceUpdate);
+
+    // ✅ Listen for a new employee being added
+    const handleEmployeeAdded = (newEmployee: Employee) => {
+      toast.info(`A new employee has been added: ${newEmployee.name}`);
+      setAllEmployees(prev => [newEmployee, ...prev]);
+    };
+    socket.on('employee_added', handleEmployeeAdded);
+
+    // ✅ Listen for an employee being updated
+    const handleEmployeeUpdated = (updatedEmployee: Employee) => {
+      toast.info(`${updatedEmployee.name}'s details have been updated.`);
+      setAllEmployees(prev =>
+        prev.map(emp => emp._id === updatedEmployee._id ? updatedEmployee : emp)
+      );
+    };
+    socket.on('employee_updated', handleEmployeeUpdated);
+
+    // ✅ Listen for an employee being deleted
+    const handleEmployeeDeleted = ({ id }: { id: string }) => {
+      // Find the name before removing for a better toast message
+      const deletedEmployee = allEmployees.find(emp => emp._id === id);
+      if (deletedEmployee) {
+        toast.error(`${deletedEmployee.name} has been removed from the system.`);
+      }
+      setAllEmployees(prev => prev.filter(emp => emp._id !== id));
+    };
+    socket.on('employee_deleted', handleEmployeeDeleted);
+
+    // --- Salary History Listener ---
+    const handleNewSalaryRecord = (newRecord: Salary) => {
+      toast.success("Your new salary slip has been generated!");
+      setAdminSalaryHistory(prev => [newRecord, ...prev]);
+    };
+    socket.on('new_salary_record', handleNewSalaryRecord);
+
+    // ✅ Listen for the cron job completion event
+    const handleAbsenteesMarked = () => {
+      toast.info("Daily attendance check complete. Absentees have been marked.");
+
+      // Re-fetch all data to ensure the 'All User Attendance' table is up-to-date.
+      // This is the simplest and most reliable way to sync the state.
+      fetchData();
+    };
+    socket.on('absentees_marked', handleAbsenteesMarked);
+
+    // ✅ Listen for updates to the ADMIN'S OWN leave requests
+    const handleLeaveStatusUpdate = (updatedLeaveRequest: LeaveRequest) => {
+      toast.info(`Your leave request status has been updated to "${updatedLeaveRequest.status}"`);
+
+      // Find and update the specific leave request in the admin's personal leave state
+      setAdminLeaveRequests(prevRequests =>
+        prevRequests.map(req =>
+          req._id === updatedLeaveRequest._id ? updatedLeaveRequest : req
+        )
+      );
+    };
+    socket.on('leave_status_updated', handleLeaveStatusUpdate);
+
+
+    // --- Cleanup Listeners ---
+    return () => {
+      socket.off('new_leave_request', handleNewLeaveRequest);
+      socket.off('new_notification', handleNewNotification);
+      socket.off('attendance_updated', handleAttendanceUpdate);
+      socket.off('employee_added', handleEmployeeAdded);
+      socket.off('employee_updated', handleEmployeeUpdated);
+      socket.off('employee_deleted', handleEmployeeDeleted);
+      socket.off('new_salary_record', handleNewSalaryRecord);
+      socket.off('absentees_marked', handleAbsenteesMarked);
+      socket.off('leave_status_updated', handleLeaveStatusUpdate);
+    };
+    // Add dependencies that, if changed, should re-run this effect
+  }, [user.id, activeTab, allEmployees, fetchData]);
 
   const openAddModal = () => {
     setEditingEmployee(null);
@@ -517,6 +666,7 @@ export function AdminDashboard() {
 
   const handleLogout = () => {
     localStorage.removeItem("user");
+    localStorage.removeItem("token")
     sessionStorage.removeItem("loginNotificationShown");
     toast.success("You have been logged out.");
     navigate("/login");
@@ -593,30 +743,81 @@ export function AdminDashboard() {
     }
   };
 
+  // ✅ THIS IS THE CORRECTED LOGIC
   const { todaysEvents, upcomingEvents } = useMemo(() => {
     const todayString = new Date().toISOString().slice(0, 10);
+
+    // Only include events where the date is EXACTLY today
     const todays = allEvents.filter(event => event.date.slice(0, 10) === todayString);
-    const upcoming = allEvents.filter(event => event.date.slice(0, 10) !== todayString);
+
+    // Only include events where the date is strictly IN THE FUTURE
+    const upcoming = allEvents.filter(event => event.date.slice(0, 10) > todayString);
+
+    // Sort upcoming events chronologically
     upcoming.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
     return { todaysEvents: todays, upcomingEvents: upcoming };
   }, [allEvents]);
 
+  // ✅ THIS IS THE UPDATED LOGIC
   const latestAdminLeave = useMemo(() => {
     if (!adminLeaveRequests || adminLeaveRequests.length === 0) return null;
-    return [...adminLeaveRequests].sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
+
+    // Sort by the `_id` in descending order to get the most recently created one
+    return [...adminLeaveRequests].sort((a, b) => {
+      if (a._id > b._id) return -1; // a is newer, so it comes first
+      if (a._id < b._id) return 1;
+      return 0;
+    })[0]; // Get the first item, which is the newest
   }, [adminLeaveRequests]);
 
 
+  // --- PAGINATION DATA SLICING ---
 
+  const totalMyAttendancePages = Math.ceil(adminAttendance.length / RECORDS_PER_PAGE);
+  const paginatedMyAttendance = adminAttendance.slice((pagination.myAttendance - 1) * RECORDS_PER_PAGE, pagination.myAttendance * RECORDS_PER_PAGE);
+
+  const totalAllUserAttendancePages = Math.ceil(allUserAttendance.length / RECORDS_PER_PAGE);
+  const paginatedAllUserAttendance = allUserAttendance.slice((pagination.allUserAttendance - 1) * RECORDS_PER_PAGE, pagination.allUserAttendance * RECORDS_PER_PAGE);
+
+  const totalManualMarkingPages = Math.ceil((employeeToMark?.attendance.length || 0) / RECORDS_PER_PAGE);
+  const paginatedManualMarking = employeeToMark?.attendance.slice((pagination.manualMarking - 1) * RECORDS_PER_PAGE, pagination.manualMarking * RECORDS_PER_PAGE) || [];
+
+  {/* use this when we paginate attendance sheet section of attendance tab
+  const totalAttendanceSheetPages = Math.ceil(attendanceSheetData.sheet.length / RECORDS_PER_PAGE);
+  const paginatedAttendanceSheet = attendanceSheetData.sheet.slice((pagination.attendanceSheet - 1) * RECORDS_PER_PAGE, pagination.attendanceSheet * RECORDS_PER_PAGE);*/}
+
+  const totalPendingLeavePages = Math.ceil(leaveRequests.length / RECORDS_PER_PAGE);
+  const paginatedPendingLeaves = leaveRequests.slice((pagination.pendingLeaves - 1) * RECORDS_PER_PAGE, pagination.pendingLeaves * RECORDS_PER_PAGE);
+
+  const totalMyLeavePages = Math.ceil(adminLeaveRequests.length / RECORDS_PER_PAGE);
+  const paginatedMyLeaves = adminLeaveRequests.slice((pagination.myLeaveRequests - 1) * RECORDS_PER_PAGE, pagination.myLeaveRequests * RECORDS_PER_PAGE);
+
+  const totalAllEmployeePages = Math.ceil(allEmployees.length / RECORDS_PER_PAGE);
+  const paginatedAllEmployees = allEmployees.slice((pagination.allEmployees - 1) * RECORDS_PER_PAGE, pagination.allEmployees * RECORDS_PER_PAGE);
+
+  const totalSentHistoryPages = Math.ceil(filteredSentHistory.length / RECORDS_PER_PAGE);
+  const paginatedSentHistory = filteredSentHistory.slice((pagination.sentNotifications - 1) * RECORDS_PER_PAGE, pagination.sentNotifications * RECORDS_PER_PAGE);
+
+  const totalMyNotificationPages = Math.ceil(filteredAdminNotifications.length / RECORDS_PER_PAGE);
+  const paginatedMyNotifications = filteredAdminNotifications.slice((pagination.myNotifications - 1) * RECORDS_PER_PAGE, pagination.myNotifications * RECORDS_PER_PAGE);
+
+  const totalAllSalaryPages = Math.ceil(filteredSalaryHistory.length / RECORDS_PER_PAGE);
+  const paginatedAllSalary = filteredSalaryHistory.slice((pagination.allSalaryHistory - 1) * RECORDS_PER_PAGE, pagination.allSalaryHistory * RECORDS_PER_PAGE);
+
+  const totalMySalaryPages = Math.ceil(filteredAdminSalaryHistory.length / RECORDS_PER_PAGE);
+  const paginatedMySalary = filteredAdminSalaryHistory.slice((pagination.mySalaryHistory - 1) * RECORDS_PER_PAGE, pagination.mySalaryHistory * RECORDS_PER_PAGE);
 
   const adminTabs = [
-    { name: "Home", icon: Home },
-    { name: "Attendance", icon: Calendar },
-    { name: "Leave Requests", icon: FileText },
-    { name: "Employee Management", icon: Users },
-    { name: "Send Notification", icon: Send },
-    { name: "Salary Punch In", icon: DollarSign }
+    { name: "Home", icon: Home, value: "home" },
+    { name: "Attendance", icon: Calendar, value: "attendance" },
+    { name: "Leave Requests", icon: FileText, value: "leave-requests" },
+    { name: "Employee Management", icon: Users, value: "employee-management" },
+    { name: "Send Notification", icon: Send, value: "send-notification" },
+    { name: "Salary Punch In", icon: DollarSign, value: "salary-punch-in" }
   ];
+
+  const monthName = new Date().toLocaleString('default', { month: 'long' });
 
 
   return (
@@ -654,12 +855,20 @@ export function AdminDashboard() {
 
       <AddEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onSubmit={handleCreateEvent} />
 
+      <MSidebar
+        tabs={adminTabs}
+        user={user}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onLogout={handleLogout}
+      />
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex w-full">
-        <Sidebar tabs={adminTabs} user={user} className="w-1/5 border-r" />
+
 
         <div className="flex-1 p-8 overflow-y-auto bg-blue-50">
           <div className="flex items-center justify-between mb-8">
-            <h1 className="text-3xl font-bold text-indigo-400">Welcome Admin, {user.name}!</h1>
+            <h1 className="text-4xl font-bold text-indigo-400">Welcome Admin, {user.name}!</h1>
             <div className="flex items-center space-x-2">
               <Button
                 variant="ghost"
@@ -678,7 +887,7 @@ export function AdminDashboard() {
 
 
           <TabsContent value="home" className="mt-4 space-y-6">
-            <Card className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white">
+            <Card className="bg-gradient-to-r from-indigo-400 to-purple-600 text-white">
               <CardHeader>
                 <CardTitle className="flex items-center"><Clock className="mr-2 h-6 w-6" /> Mark Your Attendance</CardTitle>
                 <CardDescription className="text-white">{currentTime.toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</CardDescription>
@@ -688,7 +897,7 @@ export function AdminDashboard() {
                   {currentTime.toLocaleTimeString("en-US")}
                 </div>
                 {adminPunchStatus === "punched-out" && !hasMissedPunchIn && (
-                  <Button size="lg" className="w-48 bg-green text-white" onClick={handleAdminPunchIn} disabled={!isPunchInWindow}>
+                  <Button size="lg" className="w-48 bg-green-300 text-white hover:bg-slate-200" onClick={handleAdminPunchIn} disabled={!isPunchInWindow}>
                     Punch In
                   </Button>
                 )}
@@ -723,12 +932,13 @@ export function AdminDashboard() {
             <Card>
               <CardContent className="grid md:grid-cols-2 gap-6 p-4">
                 <div className="rounded-md border p-4 flex items-center justify-center"><CalendarComponent showSelectedDateInfo={false} className="shadow-none p-0 border-0" /></div>
-                <div className="flex flex-col space-y-4">
-                  <div className="flex justify-between items-center"><h3 className="font-semibold text-lg">Company Events</h3><Button size="default" onClick={() => setIsEventModalOpen(true)}>+ Add Event</Button></div>
+                <div className="flex flex-col space-y-6">
+                  <div className="flex justify-between items-center"><h3 className="font-semibold text-2xl">My Events</h3><Button size="default" onClick={() => setIsEventModalOpen(true)}>+ Add Event</Button></div>
                   <div>
-                    <h4 className="font-semibold text-md mb-2 text-gray-800">Today</h4>
+                    <h4 className="font-semibold text-md mb-2 text-gray-800">Todays</h4>
                     <div className="overflow-y-auto max-h-40 pr-3">{todaysEvents.length > 0 ? <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">{todaysEvents.map(event => (<div key={event._id} className={`p-3 rounded-lg shadow-sm border flex flex-col h-24 transition-all ${event.status === 'completed' ? 'bg-green-100 border-green-300' : 'bg-blue-100 border-blue-200'}`}><div className="flex justify-between items-start flex-grow"><p className={`font-bold text-sm break-words ${event.status === 'completed' ? 'text-green-800 line-through' : 'text-blue-800'}`}>{event.title}</p><div className="flex items-center space-x-0.5 ml-1 flex-shrink-0">{event.status !== 'completed' && <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600 hover:bg-green-200 hover:text-green-700" onClick={() => handleMarkEventAsComplete(event._id)}><Check size={14} /></Button>}<Button variant="ghost" size="icon" className="h-6 w-6 text-red-600 hover:bg-red-200 hover:text-red-700" onClick={() => handleDeleteEvent(event._id)}><X size={14} /></Button></div></div><p className={`text-xs self-end ${event.status === 'completed' ? 'text-green-600' : 'text-blue-700'}`}>{formatTime(event.time)}</p></div>))}</div> : <p className="text-sm text-muted-foreground text-center py-4">No events for today.</p>}</div>
                   </div>
+                  <Separator className="my-2" />
                   <div>
                     <h4 className="font-semibold text-md mb-2 text-gray-800">Upcoming</h4>
                     <div className="overflow-y-auto max-h-40 pr-3">{upcomingEvents.length > 0 ? <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">{upcomingEvents.map(event => (<div key={event._id} className={`p-3 rounded-lg shadow-sm border flex flex-col h-24 transition-all ${event.status === 'completed' ? 'bg-green-100 border-green-300' : 'bg-yellow-100 border-yellow-200'}`}><div className="flex justify-between items-start flex-grow"><p className={`font-bold text-sm break-words ${event.status === 'completed' ? 'text-green-800 line-through' : 'text-yellow-800'}`}>{event.title}</p><div className="flex items-center space-x-0.5 ml-1 flex-shrink-0"><Button variant="ghost" size="icon" className="h-6 w-6 text-red-600 hover:bg-red-200 hover:text-red-700" onClick={() => handleDeleteEvent(event._id)}><X size={14} /></Button></div></div><p className={`text-xs self-end ${event.status === 'completed' ? 'text-green-600' : 'text-yellow-700'}`}>{formatDate(event.date)}</p></div>))}</div> : <p className="text-sm text-muted-foreground text-center py-4">No upcoming events.</p>}</div>
@@ -738,6 +948,9 @@ export function AdminDashboard() {
             </Card>
 
             <div className="space-y-4">
+              <h3 className="text-4xl font-semibold text-indigo-400">
+                   {monthName} stats
+              </h3>
               <div className="grid gap-4 md:grid-cols-3">
                 <Card className="bg-blue-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Total Days</CardTitle><Calendar /></CardHeader><CardContent><div className="text-7xl">{adminAttendanceStats.totalDaysInMonth}</div></CardContent></Card>
                 <Card className="bg-green-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Present</CardTitle><CheckCircle /></CardHeader><CardContent><div className="text-7xl">{adminAttendanceStats.presentDays}</div></CardContent></Card>
@@ -778,9 +991,9 @@ export function AdminDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {adminAttendance.map((att, index) => (
+                    {paginatedMyAttendance.map((att, index) => (
                       <TableRow key={`my-att-${att.date}`}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{((pagination.myAttendance - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                         <TableCell>{formatDate(att.date)}</TableCell>
                         <TableCell>{formatTime(att.checkIn)}</TableCell>
                         <TableCell>{formatTime(att.checkOut)}</TableCell>
@@ -789,6 +1002,7 @@ export function AdminDashboard() {
                     ))}
                   </TableBody>
                 </Table>
+                <PaginationControls currentPage={pagination.myAttendance} totalPages={totalMyAttendancePages} onPageChange={(page) => handlePageChange('myAttendance', page)} />
               </CardContent>
             </Card>
 
@@ -816,9 +1030,9 @@ export function AdminDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {allUserAttendance.map((att, index) => (
+                    {paginatedAllUserAttendance.map((att, index) => (
                       <TableRow key={`${att.employeeName}-${att.date}-${index}`}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{((pagination.allUserAttendance - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                         <TableCell>{att.employeeName}</TableCell>
                         <TableCell><Badge variant="secondary">{att.role}</Badge></TableCell>
                         <TableCell>{formatDate(att.date)}</TableCell>
@@ -841,6 +1055,7 @@ export function AdminDashboard() {
                     ))}
                   </TableBody>
                 </Table>
+                <PaginationControls currentPage={pagination.allUserAttendance} totalPages={totalAllUserAttendancePages} onPageChange={(page) => handlePageChange('allUserAttendance', page)} />
               </CardContent>
             </Card>
 
@@ -857,26 +1072,35 @@ export function AdminDashboard() {
                   </Select>
                 </div>
                 {employeeToMark && (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {employeeToMark.attendance.map(att => (
-                        <TableRow key={att._id}>
-                          <TableCell>{formatDate(att.date)}</TableCell>
-                          <TableCell><Badge>{att.status}</Badge></TableCell>
-                          <TableCell>
-                            <Button variant="outline" size="sm" onClick={() => { setMarkingRecord(att); setIsMarkingModalOpen(true); }}>Mark</Button>
-                          </TableCell>
+                  <>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>S.No</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Actions</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedManualMarking.map((att, index) => (
+                          <TableRow key={att._id}>
+                            <TableCell>{((pagination.manualMarking - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
+                            <TableCell>{formatDate(att.date)}</TableCell>
+                            <TableCell>
+                              <Badge variant={att.status === 'Absent' ? 'destructive' : 'default'}>
+                                {att.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Button variant="outline" size="sm" onClick={() => { setMarkingRecord(att); setIsMarkingModalOpen(true); }}>Mark</Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    <PaginationControls currentPage={pagination.manualMarking} totalPages={totalManualMarkingPages} onPageChange={(page) => handlePageChange('manualMarking', page)} />
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -938,9 +1162,9 @@ export function AdminDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {leaveRequests.map((req, index) => (
+                    {paginatedPendingLeaves.map((req, index) => (
                       <TableRow key={req.id}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{((pagination.pendingLeaves - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                         <TableCell>{req.employeeName}</TableCell>
                         <TableCell>{req.type}</TableCell>
                         <TableCell>{formatDate(req.startDate)} to {formatDate(req.endDate)}</TableCell>
@@ -960,6 +1184,7 @@ export function AdminDashboard() {
                     ))}
                   </TableBody>
                 </Table>
+                <PaginationControls currentPage={pagination.pendingLeaves} totalPages={totalPendingLeavePages} onPageChange={(page) => handlePageChange('pendingLeaves', page)} />
               </CardContent>
             </Card>
 
@@ -983,10 +1208,10 @@ export function AdminDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {adminLeaveRequests.length > 0 ? (
-                      adminLeaveRequests.map((req, index) => (
+                    {paginatedMyLeaves.length > 0 ? (
+                      paginatedMyLeaves.map((req, index) => (
                         <TableRow key={req._id}>
-                          <TableCell>{index + 1}</TableCell>
+                          <TableCell>{((pagination.myLeaveRequests - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                           <TableCell>{req.type}</TableCell>
                           <TableCell>{formatDate(req.startDate)}</TableCell>
                           <TableCell>{formatDate(req.endDate)}</TableCell>
@@ -1007,6 +1232,7 @@ export function AdminDashboard() {
                     )}
                   </TableBody>
                 </Table>
+                <PaginationControls currentPage={pagination.myLeaveRequests} totalPages={totalMyLeavePages} onPageChange={(page) => handlePageChange('myLeaveRequests', page)} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1029,9 +1255,9 @@ export function AdminDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {allEmployees.map((emp, index) => (
+                    {paginatedAllEmployees.map((emp, index) => (
                       <TableRow key={emp._id}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{((pagination.allEmployees - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                         <TableCell>{emp.name}</TableCell>
                         <TableCell>{emp.email}</TableCell>
                         <TableCell><Badge>{emp.role}</Badge></TableCell>
@@ -1045,6 +1271,7 @@ export function AdminDashboard() {
                     ))}
                   </TableBody>
                 </Table>
+                <PaginationControls currentPage={pagination.allEmployees} totalPages={totalAllEmployeePages} onPageChange={(page) => handlePageChange('allEmployees', page)} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1113,10 +1340,10 @@ export function AdminDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredSentHistory.length > 0 ?
-                      (filteredSentHistory.map((notif, index) => (
+                    {paginatedSentHistory.length > 0 ?
+                      (paginatedSentHistory.map((notif, index) => (
                         <TableRow key={notif._id}>
-                          <TableCell>{index + 1}</TableCell>
+                          <TableCell>{((pagination.sentNotifications - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                           <TableCell className="whitespace-nowrap">{formatDate(notif.date)}</TableCell>
                           <TableCell className="whitespace-nowrap">{formatSentTime(notif.sentAt)}</TableCell>
                           <TableCell className="max-w-md truncate">{notif.message}</TableCell>
@@ -1130,6 +1357,7 @@ export function AdminDashboard() {
                       </TableRow>)}
                   </TableBody>
                 </Table>
+                <PaginationControls currentPage={pagination.sentNotifications} totalPages={totalSentHistoryPages} onPageChange={(page) => handlePageChange('sentNotifications', page)} />
               </CardContent>
             </Card>
             <Card>
@@ -1144,8 +1372,8 @@ export function AdminDashboard() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {filteredAdminNotifications.length > 0 ? (
-                    filteredAdminNotifications.map((notification) => (
+                  {paginatedMyNotifications.length > 0 ? (
+                    paginatedMyNotifications.map((notification) => (
                       <div key={notification._id} className="flex items-start justify-between p-4 rounded-lg border bg-indigo-50 border-indigo-200">
                         <div className="flex items-start space-x-4">
                           <span className={`mt-1.5 h-2 w-2 rounded-full ${notification.status === "unread" ? "bg-blue-500" : "bg-indigo-200"}`} />
@@ -1160,6 +1388,7 @@ export function AdminDashboard() {
                     ))
                   ) : <p className="text-sm text-muted-foreground text-center">You have no new notifications for this period.</p>}
                 </div>
+                <PaginationControls currentPage={pagination.myNotifications} totalPages={totalMyNotificationPages} onPageChange={(page) => handlePageChange('myNotifications', page)} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1233,9 +1462,9 @@ export function AdminDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredSalaryHistory.map((sal, index) => (
+                    {paginatedAllSalary.map((sal, index) => (
                       <TableRow key={sal.id}>
-                        <TableCell>{index + 1}</TableCell>
+                        <TableCell>{((pagination.allSalaryHistory - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
                         <TableCell>{sal.employeeName}</TableCell>
                         <TableCell>{sal.month}</TableCell>
                         <TableCell>{formatDate(sal.date)}</TableCell>
@@ -1246,6 +1475,7 @@ export function AdminDashboard() {
                     ))}
                   </TableBody>
                 </Table>
+                <PaginationControls currentPage={pagination.allSalaryHistory} totalPages={totalAllSalaryPages} onPageChange={(page) => handlePageChange('allSalaryHistory', page)} />
               </CardContent>
             </Card>
             <Card>
@@ -1276,20 +1506,28 @@ export function AdminDashboard() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredAdminSalaryHistory.map((sal, index) => (
-                      <TableRow key={sal._id}>
-                        <TableCell>{index + 1}</TableCell>
-                        <TableCell>{sal.month}</TableCell>
-                        <TableCell>₹{sal.amount.toLocaleString()}</TableCell>
-                        <TableCell><Badge>{sal.status}</Badge></TableCell>
-                        <TableCell>{formatDate(sal.date)}</TableCell>
-                        <TableCell>
-                          {sal.slipPath && <Button variant="outline" size="sm" onClick={() => openSlipModal(sal.slipPath!)}>View Slip</Button>}
+                    {paginatedMySalary.length > 0 ? (
+                      paginatedMySalary.map((sal, index) => (
+                        <TableRow key={sal._id}>
+                          <TableCell>{((pagination.mySalaryHistory - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
+                          <TableCell>{sal.month}</TableCell>
+                          <TableCell>₹{sal.amount.toLocaleString()}</TableCell>
+                          <TableCell><Badge>{sal.status}</Badge></TableCell>
+                          <TableCell>{formatDate(sal.date)}</TableCell>
+                          <TableCell>
+                            {sal.slipPath && <Button variant="outline" size="sm" onClick={() => openSlipModal(sal.slipPath!)}>View Slip</Button>}
+                          </TableCell>
+                        </TableRow>
+                      ))) : (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center text-muted-foreground">
+                          No Salary history record
                         </TableCell>
                       </TableRow>
-                    ))}
+                    )}
                   </TableBody>
                 </Table>
+                <PaginationControls currentPage={pagination.mySalaryHistory} totalPages={totalMySalaryPages} onPageChange={(page) => handlePageChange('mySalaryHistory', page)} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -1298,4 +1536,3 @@ export function AdminDashboard() {
     </div>
   );
 }
-

@@ -35,11 +35,21 @@ exports.getLeaveRequests = async (req, res) => {
 
 // Apply for leave
 exports.applyForLeave = async (req, res) => {
+    const io = req.app.get('socketio');
     try {
         const employee = await Employee.findById(req.params.id);
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
         employee.leaveRequests.push(req.body);
         await employee.save();
+
+        // ✅ Emit event to all connected clients
+        const lastLeave = employee.leaveRequests[employee.leaveRequests.length - 1];
+        io.emit('new_leave_request', { 
+            ...lastLeave.toObject(), 
+            employeeName: employee.name, 
+            id: lastLeave._id 
+        });
+
         res.status(201).json(employee.leaveRequests);
     } catch (error) {
         res.status(500).json({ message: 'Error applying for leave' });
@@ -77,6 +87,7 @@ exports.markNotificationAsRead = async (req, res) => {
 };
 
 exports.punchIn = async (req, res) => {
+    const io = req.app.get('socketio');
     try {
 
         const now = new Date();
@@ -106,6 +117,18 @@ exports.punchIn = async (req, res) => {
 
         employee.attendance.push(newAttendance);
         await employee.save();
+
+        // ✅ Emit an attendance update event
+        const updatedRecord = {
+            employeeName: admin.name,
+            role: admin.role,
+            date: today,
+            checkIn: newAttendance.checkIn,
+            checkOut: '--',
+            status: 'Punched In'
+        };
+        io.emit('attendance_updated', updatedRecord);
+        
         res.status(201).json(employee.attendance);
 
     } catch (error) {

@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://192.168.1.38:5001/api', // Use your computer's IP
+  baseURL: 'http://192.168.1.67:5001/api',
+  timeout: 60000 
 });
 
 // ✅ Use an interceptor to automatically add the token to headers

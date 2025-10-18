@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
 interface AddEventModalProps {
@@ -18,9 +18,25 @@ export function AddEventModal({ isOpen, onClose, onSubmit }: AddEventModalProps)
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
 
+  // ✅ 1. Get today's date in the correct 'YYYY-MM-DD' format
+  const today = new Date().toISOString().split('T')[0];
+
+  useEffect(() => {
+    // Reset state when the modal opens
+    if (isOpen) {
+      setTitle('');
+      setDescription('');
+      setDate('');
+      setTime('');
+    }
+  }, [isOpen]);
+
   const handleSubmit = () => {
     if (!title || !date || !time) {
       return toast.error("Title, date, and time are required.");
+    }
+    if (date < today) {
+      return toast.error("Cannot create an event for a past date.");
     }
     onSubmit({ title, description, date, time });
     onClose();
@@ -32,7 +48,7 @@ export function AddEventModal({ isOpen, onClose, onSubmit }: AddEventModalProps)
         <DialogHeader><DialogTitle>Add New Event</DialogTitle></DialogHeader>
         <div className="grid gap-4 py-4">
           <div><Label htmlFor="title">Title</Label><Input id="title" value={title} onChange={e => setTitle(e.target.value)} /></div>
-          <div><Label htmlFor="date">Date</Label><Input id="date" type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
+          <div><Label htmlFor="date">Date</Label><Input id="date" type="date" value={date} onChange={e => setDate(e.target.value)} min={today} /></div>
           <div><Label htmlFor="time">Time</Label><Input id="time" type="time" value={time} onChange={e => setTime(e.target.value)} /></div>
           <div><Label htmlFor="description">Description (Optional)</Label><Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} /></div>
         </div>

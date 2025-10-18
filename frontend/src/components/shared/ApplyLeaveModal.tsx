@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import type { LeaveRequest } from "@/types";
 import { format } from "date-fns";
 import { Calendar as CalendarIcon } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 
 interface ApplyLeaveModalProps {
@@ -23,9 +23,35 @@ export function ApplyLeaveModal({ onSubmit, children }: ApplyLeaveModalProps) {
   const [endDate, setEndDate] = useState<Date | undefined>();
   const [reason, setReason] = useState<string>("");
 
+  // ✅ 1. Get today's date to use for validation.
+  // Set hours to 0 to compare dates only.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Reset state when modal is closed/opened
+  useEffect(() => {
+    if (!isOpen) {
+      setLeaveType("");
+      setStartDate(undefined);
+      setEndDate(undefined);
+      setReason("");
+    }
+  }, [isOpen]);
+
   const handleApplyLeave = () => {
     if (!leaveType || !startDate || !endDate) {
       toast.error("Please fill out the required fields.");
+      return;
+    }
+
+    if (startDate < today) {
+      toast.error("Cannot apply for leave on a past date.");
+      return;
+    }
+    
+    // Also ensure end date is not before start date
+    if (endDate < startDate) {
+      toast.error("End date cannot be before the start date.");
       return;
     }
 
@@ -69,7 +95,7 @@ export function ApplyLeaveModal({ onSubmit, children }: ApplyLeaveModalProps) {
                 {startDate ? format(startDate, "PPP") : <span>Pick a start date</span>}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={startDate} onSelect={setStartDate} initialFocus /></PopoverContent>
+            <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={startDate} onSelect={setStartDate} disabled={{ before: today }} autoFocus /></PopoverContent>
           </Popover>
           <Popover>
             <PopoverTrigger asChild>
@@ -78,7 +104,7 @@ export function ApplyLeaveModal({ onSubmit, children }: ApplyLeaveModalProps) {
                 {endDate ? format(endDate, "PPP") : <span>Pick an end date</span>}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={endDate} onSelect={setEndDate} initialFocus /></PopoverContent>
+            <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={endDate} onSelect={setEndDate} disabled={{ before: startDate || today }} autoFocus /></PopoverContent>
           </Popover>
           <Textarea
             placeholder="Enter the reason for your leave (optional)"
