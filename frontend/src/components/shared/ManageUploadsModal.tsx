@@ -9,6 +9,7 @@ interface ManageUploadsModalProps {
   isOpen: boolean;
   onClose: () => void;
   employee: Employee | null;
+  onDataChange: () => void;
 }
 
 const documentFields = [
@@ -21,7 +22,7 @@ const documentFields = [
   { key: 'cancelledCheque', label: 'Cancelled Cheque' },
 ];
 
-export function ManageUploadsModal({ isOpen, onClose, employee }: ManageUploadsModalProps) {
+export function ManageUploadsModal({ isOpen, onClose, employee, onDataChange}: ManageUploadsModalProps) {
   if (!employee) return null;
 
   const handleGrantAccess = async (field: string, label: string) => {
@@ -31,6 +32,7 @@ export function ManageUploadsModal({ isOpen, onClose, employee }: ManageUploadsM
         field: field,
       });
       toast.success(`Access granted for ${label}. The employee can now re-upload this document.`);
+      onDataChange();
     } catch (error) {
       toast.error("Failed to grant access.");
     }
@@ -52,22 +54,37 @@ export function ManageUploadsModal({ isOpen, onClose, employee }: ManageUploadsM
                 <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
             </TableHeader>
+
             <TableBody>
                 {documentFields.map(({ key, label }) => {
-                const field = employee.additionalDetails?.[key as keyof AdditionalDetails] as FileData | undefined;
                 
+                // Get the file field and the reuploadAccess array
+                const field = employee.additionalDetails?.[key as keyof AdditionalDetails] as FileData | undefined;
+                const reuploadAccess = employee.additionalDetails?.reuploadAccess || [];
+
+                // Check all possible states
                 const isUploaded = !!(field && field.path);
+                const hasReuploadAccess = reuploadAccess.includes(key);
+
+                let statusElement;
+                if (hasReuploadAccess) {
+                    // State 1: Access has been granted
+                    statusElement = <span className="text-yellow-600 font-semibold">Re-upload Granted</span>;
+                } else if (isUploaded) {
+                    // State 2: File is uploaded and locked
+                    statusElement = <span className="text-green-600 font-semibold">Uploaded</span>;
+                } else {
+                    // State 3: Not yet uploaded
+                    statusElement = <span className="text-gray-500">Not Uploaded</span>;
+                }
 
                 return (
                     <TableRow key={key}>
                     <TableCell className="font-medium">{label}</TableCell>
                     <TableCell>
-                        {isUploaded
-                        ? <span className="text-green-600 font-semibold">Uploaded</span> 
-                        : <span className="text-gray-500">Not Uploaded</span>}
+                        {statusElement} {/* ✅ Use the new status logic */}
                     </TableCell>
 
-                    {/* ✅ 2. Add new table cell for the file link */}
                     <TableCell>
                         {isUploaded ? (
                         <a
@@ -85,8 +102,13 @@ export function ManageUploadsModal({ isOpen, onClose, employee }: ManageUploadsM
 
                     <TableCell className="text-right">
                         {isUploaded && (
-                        <Button size="sm" variant="outline" onClick={() => handleGrantAccess(key,label)}>
-                            Grant Re-upload Access
+                        <Button 
+                            size="sm" 
+                            variant="outline" 
+                            onClick={() => handleGrantAccess(key,label)}
+                            disabled={hasReuploadAccess} /* ✅ Disable if already granted */
+                        >
+                            {hasReuploadAccess ? 'Access Granted' : 'Grant Re-upload Access'}
                         </Button>
                         )}
                     </TableCell>

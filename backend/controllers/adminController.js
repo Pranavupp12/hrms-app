@@ -65,7 +65,6 @@ exports.updateEmployee = async (req, res) => {
             const salt = await bcrypt.genSalt(10);
             updateData.password = await bcrypt.hash(password, salt);
         }
-
         if (req.file) {
             updateData.filePath = req.file.path;
             updateData.fileName = req.file.originalname; // Save original filename on update
@@ -268,6 +267,7 @@ exports.sendNotification = async (req, res) => {
         if (recipient === 'all') {
             io.emit('new_notification', notificationForSocket);
         } else if (Array.isArray(recipient)) {
+            console.log('Attempting to send notification to rooms:', recipient);
             recipient.forEach(userId => {
                 io.to(userId).emit('new_notification', notificationForSocket);
             });
@@ -466,7 +466,7 @@ exports.adminPunchIn = async (req, res) => {
         };
         io.emit('attendance_updated', updatedRecord);
 
-        res.status(201).json(admin.attendance);
+        res.status(201).json({ success: true, message: "Punch-in successful." });
 
     } catch (error) {
         res.status(500).json({ message: 'Error punching in' });
@@ -476,6 +476,7 @@ exports.adminPunchIn = async (req, res) => {
 // Punch Out for Admin
 // backend/controllers/adminController.js
 exports.adminPunchOut = async (req, res) => {
+    const io = req.app.get('socketio');
     try {
         const admin = await Employee.findById(req.params.id);
         if (!admin) return res.status(404).json({ message: 'Admin not found' });
@@ -494,7 +495,19 @@ exports.adminPunchOut = async (req, res) => {
 
         attendanceRecord.checkOut = new Date().toLocaleTimeString('en-IN', { hour12: false });
         await admin.save();
-        res.status(200).json(admin.attendance);
+
+        // ✅ 2. Define and emit the updated record
+        const updatedRecord = {
+            employeeName: admin.name,
+            role: admin.role,
+            date: today,
+            checkIn: attendanceRecord.checkIn,
+            checkOut: attendanceRecord.checkOut,
+            status: 'Present'
+        };
+        io.emit('attendance_updated', updatedRecord);
+
+        res.status(201).json({ success: true, message: "Punch-in successful." });
 
     } catch (error) {
         res.status(500).json({ message: 'Error punching out' });
@@ -786,6 +799,7 @@ exports.getAttendanceSheet = async (req, res) => {
 // New function to grant re-upload access
 exports.grantReuploadAccess = async (req, res) => {
     const { employeeId, field } = req.body;
+    const io = req.app.get('socketio');
     try {
         const details = await AdditionalDetails.findOne({ employee: employeeId });
         if (!details) {
@@ -796,6 +810,11 @@ exports.grantReuploadAccess = async (req, res) => {
             details.reuploadAccess.push(field);
             await details.save();
         }
+        // ✅ 2. Emit an event ONLY to this employee's room
+        io.to(employeeId).emit('reupload_access_granted', { 
+            field: field,
+            message: `Re-upload access has been granted for your ${field}.`
+        });
 
         res.status(200).json({ message: `Re-upload access granted for ${field}.` });
     } catch (error) {

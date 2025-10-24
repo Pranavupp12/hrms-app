@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 const Employee = require('../models/Employee');
 
-const markAbsentees = async () => {
+const markAbsentees = async (io) => {
   console.log('Running daily job to mark absentees at 11 AM...');
   
   const todayString = new Date().toISOString().slice(0, 10);

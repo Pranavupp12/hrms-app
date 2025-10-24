@@ -15,6 +15,7 @@ const hrRoutes = require('./routes/hrRoutes');
 const authRoutes = require('./routes/authRoutes');
 const detailsRoutes = require('./routes/detailsRoutes');
 const eventRoutes = require('./routes/eventRoutes');
+const taskRoutes = require('./routes/taskRoutes');
 
 const app = express();
 const PORT = 5001;
@@ -27,7 +28,7 @@ const server = http.createServer(app);
 // Initialize Socket.IO with CORS settings
 const io = new Server(server, {
   cors: {
-    origin:  ["http://localhost:5173", "http://192.168.1.67:5173"], // Your frontend URL
+    origin:  process.env.FRONTEND_URL, // Your frontend URL
     methods: ["GET", "POST"]
   }
 });
@@ -73,6 +74,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/hr', hrRoutes);
 app.use('/api/details', detailsRoutes);
 app.use('/api/events', eventRoutes);
+app.use('/api/tasks', taskRoutes);
 
 // this line to serve the 'slips' folder as static files
 app.use('/slips', express.static('slips'));

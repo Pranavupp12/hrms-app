@@ -8,6 +8,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../api";
 import { Loader2 } from "lucide-react";
+import { socket } from "../socket";
 
 // This helper component is now updated to handle both old and new data structures
 const FileInputDisplay = ({
@@ -72,6 +73,9 @@ export function AdditionalDetailsPage() {
   const [isUploading, setIsUploading] = useState(false);
   const navigate = useNavigate();
 
+  // ✅ 2. Get the user from localStorage to get their ID
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+
   const fetchDetails = async () => {
     if (!id) return;
     try {
@@ -87,12 +91,43 @@ export function AdditionalDetailsPage() {
     fetchDetails();
   }, [id]);
 
+  // Add this new useEffect to listen for socket events
+  useEffect(() => {
+    // Ensure we have a user ID to join a room
+    if (!user.id) return;
+
+    // Join the private room for this user
+    socket.emit('join_room', user.id);
+
+    // Define the event handler
+    const handleReuploadAccess = (data: { field: string, message: string }) => {
+      toast.info(data.message);
+      
+      // This is the key:
+      // Re-fetch all details from the server to get the new
+      // reuploadAccess array, which will unlock the input.
+      fetchDetails(); 
+    };
+
+    // Start listening
+    socket.on('reupload_access_granted', handleReuploadAccess);
+
+    // Cleanup listener when the component unmounts
+    return () => {
+      socket.off('reupload_access_granted', handleReuploadAccess);
+    };
+  }, [user.id]); // Dependency on user.id
+
+
+
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const { name, files: inputFiles } = e.target;
     if (inputFiles && inputFiles.length > 0) {
       setFiles(prev => ({ ...prev, [name]: inputFiles[0] }));
     }
   };
+
+  
 
   const handleSubmit = async () => {
 

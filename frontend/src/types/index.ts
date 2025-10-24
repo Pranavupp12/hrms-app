@@ -124,5 +124,26 @@ export interface Event {
     time: string;
     employee: string;
     status?: 'pending' | 'completed'; 
+    assignedTo: string
 }
+
+export interface Task {
+  _id: string;
+  title: string;
+  description?: string;
+  date: string;
+  time: string;
+  status: 'Pending' | 'Completed';
+  createdBy: {
+    _id: string;
+    name: string;
+  };
+  assignedTo: {
+    _id: string;
+    name: string;
+  };
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 

@@ -1,6 +1,7 @@
-import { io } from 'socket.io-client';
+import { io } from "socket.io-client";
 
-// Use an environment variable for the URL in production
-const URL = 'http://192.168.1.67:5001';
+// Read the variable from the .env file
+const URL = import.meta.env.VITE_BACKEND_URL; // <-- HERE
 
-export const socket = io(URL);
+// Make sure to cast URL to string as env variables can be undefined
+export const socket = io(String(URL));

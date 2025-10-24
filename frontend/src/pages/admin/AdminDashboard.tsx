@@ -29,7 +29,8 @@ import type {
   AllUserAttendance,
   PunchStatus,
   AttendanceSheetData,
-  Event
+  Event,
+  Task,
 } from "@/types";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
@@ -50,6 +51,8 @@ import { MSidebar } from "../../components/shared/modern-side-bar";
 import { socket } from '../../socket';
 import { PaginationControls } from "../../components/shared/PaginationControls";
 import { Separator } from "@/components/ui/separator";
+import { AssignTaskModal } from "../../components/shared/AssignTaskModal";
+import { ViewTaskModal } from "../../components/shared/ViewTaskModal";
 
 const RECORDS_PER_PAGE = 10;
 
@@ -164,6 +167,17 @@ export function AdminDashboard() {
   const [adminLeaveRequests, setAdminLeaveRequests] = useState<LeaveRequest[]>([]);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
 
+  const [personalTasks, setPersonalTasks] = useState<Task[]>([]); // For Home tab
+  const [adminManagedTasks, setAdminManagedTasks] = useState<Task[]>([]); // For Task Management tab
+  const [isAdminTaskModalOpen, setIsAdminTaskModalOpen] = useState(false); // For Create
+  const [isUpdateTaskModalOpen, setIsUpdateTaskModalOpen] = useState(false); // For Update
+  const [isDeleteTaskModalOpen, setIsDeleteTaskModalOpen] = useState(false);
+  const [isViewTaskModalOpen, setIsViewTaskModalOpen] = useState(false);
+  const [isCompletingTask, setIsCompletingTask] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   // Add state to manage pagination for each table
   const [pagination, setPagination] = useState({
     myAttendance: 1,
@@ -177,6 +191,7 @@ export function AdminDashboard() {
     myNotifications: 1,
     allSalaryHistory: 1,
     mySalaryHistory: 1,
+    allTasks: 1,
   });
 
   const handlePageChange = (table: keyof typeof pagination, page: number) => {
@@ -210,6 +225,9 @@ export function AdminDashboard() {
         attendanceSheetRes,
         eventRes,
         adminLeavesRes,
+        userTasksRes, 
+        adminCreatedTasksRes,
+
       ] = await Promise.all([
         api.get("/admin/employees"),
         api.get("/admin/leave-requests"),
@@ -222,6 +240,8 @@ export function AdminDashboard() {
         api.get('/admin/attendance-sheet'),
         api.get(`/events/${user.id}`),
         api.get(`/employees/${user.id}/leaves`),
+        api.get(`/tasks/user/${user.id}`), // ✅ Personal tasks
+        api.get(`/tasks/admin-created/${user.id}`) // ✅ Admin-managed tasks
       ]);
 
       setAllEmployees(employeesRes.data);
@@ -235,6 +255,8 @@ export function AdminDashboard() {
       setAttendanceSheetData(attendanceSheetRes.data);
       setAllEvents(eventRes.data);
       setAdminLeaveRequests(adminLeavesRes.data);
+      setPersonalTasks(userTasksRes.data);
+      setAdminManagedTasks(adminCreatedTasksRes.data)
 
       const today = new Date().toISOString().slice(0, 10);
       const myTodaysAttendance = adminAttendanceRes.data.find((att: any) => att.date === today);
@@ -264,6 +286,9 @@ export function AdminDashboard() {
         toast.info("You have new messages. Please check your notifications!");
         sessionStorage.setItem("loginNotificationShown", "true");
       }
+
+      //setAllUserAttendance(Array.isArray(allAttendanceRes.data) ? allAttendanceRes.data : []);
+
     } catch (error) {
       toast.error("Failed to fetch dashboard data.");
     }
@@ -398,6 +423,20 @@ export function AdminDashboard() {
     }
   };
 
+  // This effect keeps the modal's prop in sync with the master list
+useEffect(() => {
+  if (employeeForUploads) {
+    // Find the "fresh" version of that employee from the 'allEmployees' list
+    // which was just updated by fetchData
+    const freshEmployee = allEmployees.find(emp => emp._id === employeeForUploads._id);
+    if (freshEmployee) {
+      // Now, update the 'employeeForUploads' state.
+      // This will pass the new prop to the modal and force it to re-render.
+      setEmployeeForUploads(freshEmployee);
+    }
+  }
+}, [allEmployees]);
+
   useEffect(() => {
     // Join a private room for this admin's user ID
     if (user.id) {
@@ -418,7 +457,8 @@ export function AdminDashboard() {
     const handleNewNotification = (newNotification: AppNotification) => {
       toast.info(`New notification received: ${newNotification.message}`);
       // Add to the top of the list and update unread status
-      setAdminNotifications(prev => [newNotification, ...prev]);
+      //setAdminNotifications(prev => [newNotification, ...prev]);
+      fetchData();
       setHasUnread(true);
     };
     socket.on('new_notification', handleNewNotification);
@@ -488,6 +528,48 @@ export function AdminDashboard() {
     };
     socket.on('leave_status_updated', handleLeaveStatusUpdate);
 
+    const handlePersonalTaskUpdate = () => {
+      // Refetch personal tasks
+      api.get(`/tasks/user/${user.id}`).then(res => setPersonalTasks(Array.isArray(res.data) ? res.data : []));
+     
+    };
+    socket.on('personal_task_update', handlePersonalTaskUpdate);
+
+    const handleAdminTaskCreated = (newTask: Task) => {
+      setAdminManagedTasks(prev => [newTask, ...prev]);
+      toast.success('Task created successfully')
+    };
+    socket.on('admin_task_created', handleAdminTaskCreated);
+
+    const handleAdminTaskUpdated = (updatedTask: Task) => {
+      setAdminManagedTasks(prev => prev.map(t => t._id === updatedTask._id ? updatedTask : t));
+    };
+    socket.on('admin_task_updated', handleAdminTaskUpdated);
+
+    const handleAdminTaskStatusUpdated = (updatedTask: Task) => {
+      setAdminManagedTasks(prev => prev.map(t => t._id === updatedTask._id ? updatedTask : t));
+    };
+    socket.on('admin_task_status_updated', handleAdminTaskStatusUpdated);
+
+    const handleAdminTaskDeleted = ({ id }: { id: string }) => {
+      setAdminManagedTasks(prev => prev.filter(t => t._id !== id));
+    };
+    socket.on('admin_task_deleted', handleAdminTaskDeleted);
+
+    // ✅ ADD THIS NEW LISTENER
+    const handleEmployeeDetailsUpdated = ({ employeeId }: { employeeId: string }) => {
+      // Find the employee name from your current state for a nice toast message
+      const employee = allEmployees.find(e => e._id === employeeId);
+      if (employee) {
+        toast.info(`${employee.name}'s document details were just updated.`);
+      }
+      // Re-fetch all data. This gets the new employee list, which
+      // will be passed to the modal, forcing it to update.
+      fetchData();
+    };
+    
+    socket.on('employee_details_updated', handleEmployeeDetailsUpdated);
+
 
     // --- Cleanup Listeners ---
     return () => {
@@ -500,9 +582,15 @@ export function AdminDashboard() {
       socket.off('new_salary_record', handleNewSalaryRecord);
       socket.off('absentees_marked', handleAbsenteesMarked);
       socket.off('leave_status_updated', handleLeaveStatusUpdate);
+      socket.off('personal_task_update', handlePersonalTaskUpdate);
+      socket.off('admin_task_created', handleAdminTaskCreated);
+      socket.off('admin_task_updated', handleAdminTaskUpdated);
+      socket.off('admin_task_status_updated', handleAdminTaskStatusUpdated);
+      socket.off('admin_task_deleted', handleAdminTaskDeleted);
+      socket.off('employee_details_updated', handleEmployeeDetailsUpdated);
     };
     // Add dependencies that, if changed, should re-run this effect
-  }, [user.id, activeTab, allEmployees, fetchData]);
+  }, [user.id, activeTab, allEmployees, employeeForUploads, fetchData]);
 
   const openAddModal = () => {
     setEditingEmployee(null);
@@ -528,6 +616,7 @@ export function AdminDashboard() {
   };
 
   const handleSaveEmployee = async (formData: FormData) => {
+  setIsSubmitting(true);
     try {
       if (editingEmployee) {
         await api.put(`/admin/employees/${editingEmployee._id}`, formData, {
@@ -546,7 +635,9 @@ export function AdminDashboard() {
       fetchData();
     } catch (error) {
       toast.error("Failed to save employee.");
-    }
+    }finally {
+    setIsSubmitting(false); // <-- 2. SET LOADING TO FALSE (even if it fails)
+  }
   };
 
   const handleApproveLeave = async (leaveId: string) => {
@@ -711,6 +802,69 @@ export function AdminDashboard() {
     catch (error) { toast.error("Failed to delete event."); fetchData(); }
   };
 
+  // Admin Task (Task Mgmt Tab)
+  const handleCreateAssignedTask = async (taskData: { title: string; description: string; date: string; time: string; assignedTo: string }) => {
+    try {
+      await api.post('/tasks', { ...taskData, createdBy: user.id });
+      toast.success("Task created and assigned!");
+      setIsAdminTaskModalOpen(false);
+    } catch (error) {
+      toast.error("Failed to create task.");
+    }
+  };
+
+  const handleUpdateTask = async (taskData: { title: string; description: string; date: string; time: string; assignedTo: string }) => {
+    if (!selectedTask) return;
+    try {
+      await api.put(`/tasks/${selectedTask._id}`, { ...taskData, createdBy: selectedTask.createdBy._id });
+      toast.success("Task updated successfully!");
+      setIsUpdateTaskModalOpen(false);
+      setSelectedTask(null);
+    } catch (error) {
+      toast.error("Failed to update task.");
+    }
+  };
+
+  const confirmDeleteTask = async () => {
+    if (!selectedTask) return;
+    try {
+      await api.delete(`/tasks/${selectedTask._id}`);
+      toast.success("Task deleted successfully!");
+    } catch (error) {
+      toast.error("Failed to delete task.");
+    } finally {
+      setIsDeleteTaskModalOpen(false);
+      setSelectedTask(null);
+    }
+  };
+
+  const handleMarkTaskAsComplete = async (taskId: string) => {
+    setIsCompletingTask(true);
+    try { 
+      await api.put(`/tasks/${taskId}/status`); 
+      toast.success("Task marked as complete!");
+      setIsViewTaskModalOpen(false);
+      setSelectedTask(null);
+    } catch (error) { 
+      toast.error("Failed to update task status."); 
+    } finally {
+      setIsCompletingTask(false);
+    }
+  };
+
+  const openViewTaskModal = (task: Task) => {
+    setSelectedTask(task);
+    setIsViewTaskModalOpen(true);
+  };
+  const openUpdateTaskModal = (task: Task) => {
+    setSelectedTask(task);
+    setIsUpdateTaskModalOpen(true);
+  };
+  const openDeleteTaskModal = (task: Task) => {
+    setSelectedTask(task);
+    setIsDeleteTaskModalOpen(true);
+  };
+
   // ✅ NEW: `useMemo` hooks for Home tab data processing, same as HR dashboard
   const adminAttendanceStats = useMemo(() => {
     const stats = { presentDays: 0, absentDays: 0, sickLeaveDays: 0, paidLeaveDays: 0, shortLeaveDays: 0, halfDayLeaves: 0, totalDaysInMonth: 0 };
@@ -771,13 +925,17 @@ export function AdminDashboard() {
     })[0]; // Get the first item, which is the newest
   }, [adminLeaveRequests]);
 
+  const sortedPersonalTasks = useMemo(() => {
+    return [...personalTasks].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [personalTasks]);
+
 
   // --- PAGINATION DATA SLICING ---
 
   const totalMyAttendancePages = Math.ceil(adminAttendance.length / RECORDS_PER_PAGE);
   const paginatedMyAttendance = adminAttendance.slice((pagination.myAttendance - 1) * RECORDS_PER_PAGE, pagination.myAttendance * RECORDS_PER_PAGE);
 
-  const totalAllUserAttendancePages = Math.ceil(allUserAttendance.length / RECORDS_PER_PAGE);
+  const totalAllUserAttendancePages = Math.ceil((allUserAttendance || []).length / RECORDS_PER_PAGE);
   const paginatedAllUserAttendance = allUserAttendance.slice((pagination.allUserAttendance - 1) * RECORDS_PER_PAGE, pagination.allUserAttendance * RECORDS_PER_PAGE);
 
   const totalManualMarkingPages = Math.ceil((employeeToMark?.attendance.length || 0) / RECORDS_PER_PAGE);
@@ -808,11 +966,15 @@ export function AdminDashboard() {
   const totalMySalaryPages = Math.ceil(filteredAdminSalaryHistory.length / RECORDS_PER_PAGE);
   const paginatedMySalary = filteredAdminSalaryHistory.slice((pagination.mySalaryHistory - 1) * RECORDS_PER_PAGE, pagination.mySalaryHistory * RECORDS_PER_PAGE);
 
+  const totalTaskPages = Math.ceil(adminManagedTasks.length / RECORDS_PER_PAGE);
+  const paginatedTasks = adminManagedTasks.slice((pagination.allTasks - 1) * RECORDS_PER_PAGE, pagination.allTasks * RECORDS_PER_PAGE);
+
   const adminTabs = [
     { name: "Home", icon: Home, value: "home" },
     { name: "Attendance", icon: Calendar, value: "attendance" },
     { name: "Leave Requests", icon: FileText, value: "leave-requests" },
     { name: "Employee Management", icon: Users, value: "employee-management" },
+    { name: "Task Management", icon: UserCheck, value: "task-management" },
     { name: "Send Notification", icon: Send, value: "send-notification" },
     { name: "Salary Punch In", icon: DollarSign, value: "salary-punch-in" }
   ];
@@ -822,7 +984,7 @@ export function AdminDashboard() {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      <EmployeeModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSubmit={handleSaveEmployee} employee={editingEmployee} viewMode={isViewMode} />
+      <EmployeeModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSubmit={handleSaveEmployee} employee={editingEmployee} viewMode={isViewMode} isSubmitting={isSubmitting} />
       <ConfirmationModal
         isOpen={isDeleteModalOpen}
         onClose={() => setIsDeleteModalOpen(false)}
@@ -851,6 +1013,7 @@ export function AdminDashboard() {
         isOpen={isUploadsModalOpen}
         onClose={() => setIsUploadsModalOpen(false)}
         employee={employeeForUploads}
+        onDataChange={fetchData}
       />
 
       <AddEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onSubmit={handleCreateEvent} />
@@ -861,6 +1024,34 @@ export function AdminDashboard() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onLogout={handleLogout}
+      />
+
+      <AssignTaskModal
+        isOpen={isAdminTaskModalOpen}
+        onClose={() => setIsAdminTaskModalOpen(false)}
+        onSubmit={handleCreateAssignedTask}
+        employees={allEmployees} 
+      />
+      <AssignTaskModal
+        isOpen={isUpdateTaskModalOpen}
+        onClose={() => setIsUpdateTaskModalOpen(false)}
+        onSubmit={handleUpdateTask}
+        employees={allEmployees}
+        taskToUpdate={selectedTask}
+      />
+      <ConfirmationModal
+        isOpen={isDeleteTaskModalOpen}
+        onClose={() => setIsDeleteTaskModalOpen(false)}
+        onConfirm={confirmDeleteTask}
+        title="Delete Task"
+        description="Are you sure you want to delete this task?"
+      />
+      <ViewTaskModal
+        isOpen={isViewTaskModalOpen}
+        onClose={() => setIsViewTaskModalOpen(false)}
+        onComplete={handleMarkTaskAsComplete}
+        task={selectedTask}
+        isCompleting={isCompletingTask}
       />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex w-full">
@@ -946,6 +1137,38 @@ export function AdminDashboard() {
                 </div>
               </CardContent>
             </Card>
+
+            <Card>
+                <CardHeader>
+                  <CardTitle>My Assigned Tasks</CardTitle>
+                  <CardDescription>Tasks assigned to you by management.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-y-auto max-h-64 pr-3">
+                    {sortedPersonalTasks.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {sortedPersonalTasks.map(task => (
+                          <Button
+                            key={task._id}
+                            variant="outline"
+                            className={`h-auto p-3 rounded-lg shadow-sm flex flex-col items-start justify-start text-left ${
+                              task.status === 'Completed' ? 'bg-green-50 border-green-200' : 'bg-white'
+                            }`}
+                            onClick={() => openViewTaskModal(task)}
+                          >
+                            <div className="flex justify-between w-full items-start">
+                              <p className={`font-bold text-sm ${task.status === 'Completed' ? 'line-through text-muted-foreground' : 'text-primary'}`}>{task.title}</p>
+                              <Badge variant={task.status === 'Completed' ? 'default' : 'outline'}>{task.status}</Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">From: {task.createdBy.name}</p>
+                            <p className="text-xs text-muted-foreground mt-2 self-end">{formatDate(task.date)}</p>
+                          </Button>
+                        ))}
+                      </div>
+                    ) : <p className="text-sm text-muted-foreground text-center py-4">You have no assigned tasks.</p>}
+                  </div>
+                </CardContent>
+              </Card>
 
             <div className="space-y-4">
               <h3 className="text-4xl font-semibold text-indigo-400">
@@ -1275,6 +1498,54 @@ export function AdminDashboard() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          <TabsContent value="task-management" className="mt-4">
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <CardTitle>Assigned Tasks</CardTitle>
+                  <Button onClick={() => setIsAdminTaskModalOpen(true)}>+ Create Task</Button>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>S.No</TableHead>
+                          <TableHead>Task Title</TableHead>
+                          <TableHead>Assigned To</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {paginatedTasks.map((task, index) => (
+                          <TableRow key={task._id}>
+                            <TableCell>{((pagination.allTasks - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
+                            <TableCell>{task.title}</TableCell>
+                            <TableCell>{task.assignedTo?.name || 'N/A'}</TableCell>
+                            <TableCell>{formatDate(task.date)}</TableCell>
+                            <TableCell>
+                              <Badge variant={task.status === 'Completed' ? 'default' : 'outline'}>{task.status}</Badge>
+                            </TableCell>
+                            <TableCell className="space-x-2">
+                              <Button variant="outline" size="sm" onClick={() => openViewTaskModal(task)}>View</Button>
+                              <Button variant="outline" size="sm" onClick={() => openUpdateTaskModal(task)}>Update</Button>
+                              <Button variant="destructive" size="sm" onClick={() => openDeleteTaskModal(task)}>Delete</Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  <PaginationControls 
+                    currentPage={pagination.allTasks} 
+                    totalPages={totalTaskPages} 
+                    onPageChange={(page) => handlePageChange('allTasks', page)} 
+                  />
+                </CardContent>
+              </Card>
+            </TabsContent>
 
           <TabsContent value="send-notification" className="mt-4 space-y-6">
             <Card>

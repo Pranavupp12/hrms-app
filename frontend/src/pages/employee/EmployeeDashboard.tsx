@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import type { PunchStatus, Employee, LeaveRequest, AppNotification, Event, Salary } from "@/types";
+import type { PunchStatus, Employee, LeaveRequest, AppNotification, Event, Salary, Task } from "@/types";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -19,6 +19,7 @@ import { MSidebar } from "../../components/shared/modern-side-bar";
 import { socket } from '../../socket';
 import { PaginationControls } from "../../components/shared/PaginationControls";
 import { Separator } from "@/components/ui/separator";
+import { ViewTaskModal } from "../../components/shared/ViewTaskModal";
 
 const RECORDS_PER_PAGE = 10;
 
@@ -73,6 +74,12 @@ export function EmployeeDashboard() {
   const [events, setEvents] = useState<Event[]>([]);
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
 
+  // ✅ New Task State
+  const [personalTasks, setPersonalTasks] = useState<Task[]>([]);
+  const [isViewTaskModalOpen, setIsViewTaskModalOpen] = useState(false);
+  const [isCompletingTask, setIsCompletingTask] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
   // ✅ 3. Add state for pagination
   const [pagination, setPagination] = useState({
     myAttendance: 1,
@@ -96,15 +103,17 @@ export function EmployeeDashboard() {
   const fetchData = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const [attendanceRes, salaryRes, leavesRes, notificationsRes, eventsRes] = await Promise.all([
+      const [attendanceRes, salaryRes, leavesRes, notificationsRes, eventsRes, userTaskRes] = await Promise.all([
         api.get(`/employees/${user.id}/attendance`),
         api.get(`/employees/${user.id}/salaries`),
         api.get(`/employees/${user.id}/leaves`),
         api.get(`/employees/${user.id}/notifications`),
-        api.get(`/events/${user.id}`)
+        api.get(`/events/${user.id}`),
+        api.get(`/tasks/user/${user.id}`),
       ]);
 
       setEvents(eventsRes.data);
+      setPersonalTasks(userTaskRes.data);
 
       const unread = notificationsRes.data.some((n: any) => n.status === 'unread');
       setHasUnread(unread);
@@ -192,7 +201,8 @@ export function EmployeeDashboard() {
     // 1. Listen for personal notifications sent to this employee
     const handleNewNotification = (newNotification: AppNotification) => {
       toast.info(`New notification: ${newNotification.message}`);
-      setEmployee(prev => prev ? { ...prev, notifications: [newNotification, ...prev.notifications] } : null);
+      //setEmployee(prev => prev ? { ...prev, notifications: [newNotification, ...prev.notifications] } : null);
+      fetchData();
       setHasUnread(true);
     };
     socket.on('new_notification', handleNewNotification);
@@ -223,12 +233,19 @@ export function EmployeeDashboard() {
     };
     socket.on('new_salary_record', handleNewSalaryRecord);
 
+    // ✅ Task Listener
+    const handlePersonalTaskUpdate = () => {
+      api.get(`/tasks/user/${user.id}`).then(res => setPersonalTasks(Array.isArray(res.data) ? res.data : []));
+    };
+    socket.on('personal_task_update', handlePersonalTaskUpdate);
+
 
     // --- Cleanup Listeners ---
     return () => {
       socket.off('new_notification', handleNewNotification);
       socket.off('leave_status_updated', handleLeaveStatusUpdate);
       socket.off('new_salary_record', handleNewSalaryRecord);
+      socket.off('personal_task_update', handlePersonalTaskUpdate);
     };
   }, [user.id]);
 
@@ -295,6 +312,10 @@ export function EmployeeDashboard() {
 
     return { todaysEvents: todays, upcomingEvents: upcoming };
   }, [events]);
+
+  const sortedPersonalTasks = useMemo(() => {
+    return [...personalTasks].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  }, [personalTasks]);
 
   // ✅ THIS IS THE UPDATED LOGIC
   const latestLeave = useMemo(() => {
@@ -439,6 +460,26 @@ export function EmployeeDashboard() {
     }
   };
 
+  const handleMarkTaskAsComplete = async (taskId: string) => {
+    setIsCompletingTask(true);
+    try { 
+      await api.put(`/tasks/${taskId}/status`); 
+      toast.success("Task marked as complete!");
+      setIsViewTaskModalOpen(false);
+      setSelectedTask(null);
+    } catch (error) { 
+      toast.error("Failed to update task status."); 
+      fetchData();
+    } finally {
+      setIsCompletingTask(false);
+    }
+  };
+  
+  const openViewTaskModal = (task: Task) => {
+    setSelectedTask(task);
+    setIsViewTaskModalOpen(true);
+  };
+
   // --- PAGINATION DATA SLICING ---
   
   const totalMyAttendancePages = Math.ceil((employee?.attendance.length || 0) / RECORDS_PER_PAGE);
@@ -492,6 +533,14 @@ export function EmployeeDashboard() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onLogout={handleLogout}
+      />
+
+      <ViewTaskModal
+        isOpen={isViewTaskModalOpen}
+        onClose={() => setIsViewTaskModalOpen(false)}
+        onComplete={handleMarkTaskAsComplete}
+        task={selectedTask}
+        isCompleting={isCompletingTask}
       />
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex w-full">
@@ -641,6 +690,38 @@ export function EmployeeDashboard() {
                 </div>
               </CardContent>
             </Card>
+
+            <Card>
+                <CardHeader>
+                  <CardTitle>My Assigned Tasks</CardTitle>
+                  <CardDescription>Tasks assigned to you by management.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-y-auto max-h-64 pr-3">
+                    {sortedPersonalTasks.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {sortedPersonalTasks.map(task => (
+                          <Button
+                            key={task._id}
+                            variant="outline"
+                            className={`h-auto p-3 rounded-lg shadow-sm flex flex-col items-start justify-start text-left ${
+                              task.status === 'Completed' ? 'bg-green-50 border-green-200' : 'bg-white'
+                            }`}
+                            onClick={() => openViewTaskModal(task)}
+                          >
+                            <div className="flex justify-between w-full items-start">
+                              <p className={`font-bold text-sm ${task.status === 'Completed' ? 'line-through text-muted-foreground' : 'text-primary'}`}>{task.title}</p>
+                              <Badge variant={task.status === 'Completed' ? 'default' : 'outline'}>{task.status}</Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">From: {task.createdBy.name}</p>
+                            <p className="text-xs text-muted-foreground mt-2 self-end">{formatDate(task.date)}</p>
+                          </Button>
+                        ))}
+                      </div>
+                    ) : <p className="text-sm text-muted-foreground text-center py-4">You have no assigned tasks.</p>}
+                  </div>
+                </CardContent>
+              </Card>
 
             {/* 3. ATTENDANCE CARDS SECTION */}
             <div className="space-y-4">

@@ -200,7 +200,6 @@ exports.getHrAttendance = async (req, res) => {
 exports.hrPunchIn = async (req, res) => {
     const io = req.app.get('socketio');
     try {
-
         const now = new Date();
         const currentHour = now.getHours();
         
@@ -228,10 +227,10 @@ exports.hrPunchIn = async (req, res) => {
         hr.attendance.push(newAttendance);
         await hr.save();
 
-        // ✅ Emit an attendance update event
+        // ✅ THE FIX: Use the 'hr' variable instead of 'admin'
         const updatedRecord = {
-            employeeName: admin.name,
-            role: admin.role,
+            employeeName: hr.name,
+            role: hr.role,
             date: today,
             checkIn: newAttendance.checkIn,
             checkOut: '--',
@@ -239,16 +238,17 @@ exports.hrPunchIn = async (req, res) => {
         };
         io.emit('attendance_updated', updatedRecord);
 
-        res.status(201).json(hr.attendance);
+        res.status(200).json({ success: true, message: "Punch-in successful." });
 
     } catch (error) {
+        console.error("HR Punch-in error:", error);
         res.status(500).json({ message: 'Error punching in' });
     }
 };
 
 // Punch Out for HR
-// backend/controllers/hrController.js
 exports.hrPunchOut = async (req, res) => {
+    const io = req.app.get('socketio'); // ✅ 1. Get the io instance
     try {
         const hr = await Employee.findById(req.params.id);
         if (!hr) return res.status(404).json({ message: 'HR not found' });
@@ -267,9 +267,23 @@ exports.hrPunchOut = async (req, res) => {
 
         attendanceRecord.checkOut = new Date().toLocaleTimeString('en-IN', { hour12: false });
         await hr.save();
-        res.status(200).json(hr.attendance);
+
+        // ✅ 2. Define and emit the updated record
+        const updatedRecord = {
+            employeeName: hr.name,
+            role: hr.role,
+            date: today,
+            checkIn: attendanceRecord.checkIn,
+            checkOut: attendanceRecord.checkOut,
+            status: 'Present'
+        };
+        io.emit('attendance_updated', updatedRecord);
+        
+        // ✅ 3. Send the success response
+        res.status(200).json({ success: true, message: "Punch-out successful." });
 
     } catch (error) {
+        console.error("HR Punch-out error:", error);
         res.status(500).json({ message: 'Error punching out' });
     }
 };

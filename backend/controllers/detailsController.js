@@ -16,6 +16,7 @@ exports.getDetails = async (req, res) => {
 
 // Update / Create or give access to change Additional Details
 exports.updateDetails = async (req, res) => {
+    const io = req.app.get('socketio');
     try {
         const { personalEmail } = req.body;
         let details = await AdditionalDetails.findOne({ employee: req.params.id });
@@ -57,6 +58,11 @@ exports.updateDetails = async (req, res) => {
 
         await details.save();
         await Employee.findByIdAndUpdate(req.params.id, { additionalDetails: details._id });
+
+        // ✅ 2. Emit an event to notify admins that this employee's data has changed.
+        // We use a general event name that admins/HR can listen for.
+        io.emit('employee_details_updated', { employeeId: req.params.id });
+        
         res.status(200).json(details);
     } catch (error) {
         console.error("Error updating details:", error);

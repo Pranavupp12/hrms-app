@@ -118,18 +118,18 @@ exports.punchIn = async (req, res) => {
         employee.attendance.push(newAttendance);
         await employee.save();
 
-        // ✅ Emit an attendance update event
         const updatedRecord = {
-            employeeName: admin.name,
-            role: admin.role,
+            employeeName: employee.name,
+            role: employee.role,
             date: today,
             checkIn: newAttendance.checkIn,
             checkOut: '--',
             status: 'Punched In'
         };
+        
         io.emit('attendance_updated', updatedRecord);
         
-        res.status(201).json(employee.attendance);
+        res.status(200).json({ success: true, message: "Punch-in successful." });
 
     } catch (error) {
         res.status(500).json({ message: 'Error punching in' });
@@ -139,6 +139,7 @@ exports.punchIn = async (req, res) => {
 
 // backend/controllers/employeeController.js
 exports.punchOut = async (req, res) => {
+    const io = req.app.get('socketio');
     try {
         
         const employee = await Employee.findById(req.params.id);
@@ -158,7 +159,19 @@ exports.punchOut = async (req, res) => {
 
         attendanceRecord.checkOut = new Date().toLocaleTimeString('en-IN', { hour12: false });
         await employee.save();
-        res.status(200).json(employee.attendance);
+
+        // ✅ DEFINE THE UPDATED RECORD OBJECT
+        const updatedRecord = {
+            employeeName: employee.name,
+            role: employee.role,
+            date: today,
+            checkIn: attendanceRecord.checkIn,
+            checkOut: attendanceRecord.checkOut,
+            status: 'Present'
+        };
+        io.emit('attendance_updated', updatedRecord);
+
+       res.status(200).json({ success: true, message: "Punch-out successful." });
 
     } catch (error) {
         res.status(500).json({ message: 'Error punching out' });

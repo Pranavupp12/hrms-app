@@ -25,7 +25,8 @@ import type {
     PunchStatus,
     Salary,
     LeaveRequest,
-    Event
+    Event,
+    Task
 } from "@/types";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
@@ -45,6 +46,7 @@ import { MSidebar } from "../../components/shared/modern-side-bar";
 import { socket } from '../../socket';
 import { PaginationControls } from "../../components/shared/PaginationControls";
 import { Separator } from "@/components/ui/separator";
+import { ViewTaskModal } from "../../components/shared/ViewTaskModal";
 
 const RECORDS_PER_PAGE = 10;
 
@@ -140,6 +142,12 @@ export function HrDashboard() {
     const [hrEvents, setHrEvents] = useState<Event[]>([]);
     const [hrLeaveRequests, setHrLeaveRequests] = useState<LeaveRequest[]>([]);
 
+    // ✅ New Task State
+    const [personalTasks, setPersonalTasks] = useState<Task[]>([]);
+    const [isViewTaskModalOpen, setIsViewTaskModalOpen] = useState(false);
+    const [isCompletingTask, setIsCompletingTask] = useState(false);
+    const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
     // ✅ 3. Add state to manage pagination for each table
     const [pagination, setPagination] = useState({
         myAttendance: 1,
@@ -187,6 +195,7 @@ export function HrDashboard() {
                 hrSalaryRes,
                 hrEventsRes,
                 hrLeavesRes,
+                userTaskRes,
             ] = await Promise.all([
                 api.get("/hr/employees"),
                 api.get("/hr/notifications"),
@@ -196,6 +205,7 @@ export function HrDashboard() {
                 api.get(`/hr/${user.id}/salaries`),
                 api.get(`/events/${user.id}`),
                 api.get(`/employees/${user.id}/leaves`),
+                api.get(`/tasks/user/${user.id}`),
             ]);
 
             setAllEmployees(employeesRes.data);
@@ -206,6 +216,7 @@ export function HrDashboard() {
             setHrSalaryHistory(hrSalaryRes.data);
             setHrEvents(hrEventsRes.data);
             setHrLeaveRequests(hrLeavesRes.data);
+            setPersonalTasks(userTaskRes.data)
 
             const today = new Date().toISOString().slice(0, 10);
             const myTodaysAttendance = hrAttendanceRes.data.find((att: any) => att.date === today);
@@ -373,7 +384,8 @@ export function HrDashboard() {
         // 2. Listen for personal notifications sent to this HR user
         const handleNewNotification = (newNotification: AppNotification) => {
             toast.info(`New notification: ${newNotification.message}`);
-            setHrNotifications(prev => [newNotification, ...prev]);
+            //setHrNotifications(prev => [newNotification, ...prev]);
+            fetchData();
             setHasUnread(true);
         };
         socket.on('new_notification', handleNewNotification);
@@ -381,9 +393,8 @@ export function HrDashboard() {
         // 3. Listen for general attendance updates
         const handleAttendanceUpdate = (_updatedRecord: AllUserAttendance) => {
             // If the HR user is on the attendance tab, refresh the data to see the live update
-            if (activeTab === 'attendance') {
-                fetchData();
-            }
+            fetchData();
+         
         };
         socket.on('attendance_updated', handleAttendanceUpdate);
 
@@ -443,6 +454,12 @@ export function HrDashboard() {
         };
         socket.on('leave_status_updated', handleLeaveStatusUpdate);
 
+        const handlePersonalTaskUpdate = () => {
+            api.get(`/tasks/user/${user.id}`).then(res => setPersonalTasks(Array.isArray(res.data) ? res.data : []));
+            fetchData()
+        };
+        socket.on('personal_task_update', handlePersonalTaskUpdate);
+
 
 
         // --- Cleanup Listeners ---
@@ -456,6 +473,7 @@ export function HrDashboard() {
             socket.off('new_salary_record', handleNewSalaryRecord);
             socket.off('absentees_marked', handleAbsenteesMarked);
             socket.off('leave_status_updated', handleLeaveStatusUpdate);
+            socket.off('personal_task_update', handlePersonalTaskUpdate);
 
         };
     }, [user.id, activeTab, allEmployees, fetchData]); // Dependencies remain the same
@@ -667,6 +685,33 @@ export function HrDashboard() {
         }
     };
 
+    // ✅ Handler for the new modal's "Complete" button
+    const handleMarkTaskAsComplete = async (taskId: string) => {
+        setIsCompletingTask(true);
+        try {
+            await api.put(`/tasks/${taskId}/status`);
+            toast.success("Task marked as complete!");
+            setIsViewTaskModalOpen(false);
+            setSelectedTask(null);
+        } catch (error) {
+            toast.error("Failed to update task status.");
+            fetchData(); // Revert on error
+        } finally {
+            setIsCompletingTask(false);
+        }
+    };
+
+    // ✅ Modal Opener
+    const openViewTaskModal = (task: Task) => {
+        setSelectedTask(task);
+        setIsViewTaskModalOpen(true);
+    };
+
+    // ✅ Memo for tasks
+    const sortedPersonalTasks = useMemo(() => {
+        return [...personalTasks].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    }, [personalTasks]);
+
     const totalMyAttendancePages = Math.ceil(hrAttendance.length / RECORDS_PER_PAGE);
     const paginatedMyAttendance = hrAttendance.slice((pagination.myAttendance - 1) * RECORDS_PER_PAGE, pagination.myAttendance * RECORDS_PER_PAGE);
 
@@ -742,6 +787,14 @@ export function HrDashboard() {
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
                 onLogout={handleLogout}
+            />
+
+            <ViewTaskModal
+                isOpen={isViewTaskModalOpen}
+                onClose={() => setIsViewTaskModalOpen(false)}
+                onComplete={handleMarkTaskAsComplete}
+                task={selectedTask}
+                isCompleting={isCompletingTask}
             />
 
 
@@ -835,6 +888,39 @@ export function HrDashboard() {
                                 </div>
                             </CardContent>
                         </Card>
+
+                        {/* ✅ NEW: My Assigned Tasks Card */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>My Assigned Tasks</CardTitle>
+                                <CardDescription>Tasks assigned to you by management.</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="overflow-y-auto max-h-64 pr-3">
+                                    {sortedPersonalTasks.length > 0 ? (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                            {sortedPersonalTasks.map(task => (
+                                                <Button
+                                                    key={task._id}
+                                                    variant="outline"
+                                                    className={`h-auto p-3 rounded-lg shadow-sm flex flex-col items-start justify-start text-left ${task.status === 'Completed' ? 'bg-green-50 border-green-200' : 'bg-white'
+                                                        }`}
+                                                    onClick={() => openViewTaskModal(task)}
+                                                >
+                                                    <div className="flex justify-between w-full items-start">
+                                                        <p className={`font-bold text-sm ${task.status === 'Completed' ? 'line-through text-muted-foreground' : 'text-primary'}`}>{task.title}</p>
+                                                        <Badge variant={task.status === 'Completed' ? 'default' : 'outline'}>{task.status}</Badge>
+                                                    </div>
+                                                    <p className="text-xs text-muted-foreground mt-1">From: {task.createdBy.name}</p>
+                                                    <p className="text-xs text-muted-foreground mt-2 self-end">{formatDate(task.date)}</p>
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    ) : <p className="text-sm text-muted-foreground text-center py-4">You have no assigned tasks.</p>}
+                                </div>
+                            </CardContent>
+                        </Card>
+
                         <div className="space-y-4">
 
                             <h3 className="text-4xl font-semibold text-indigo-400">

@@ -1,7 +1,12 @@
 import axios from 'axios';
 
+const baseURL = `${import.meta.env.VITE_BACKEND_URL}/api`;
+
 const api = axios.create({
-  baseURL: 'http://192.168.1.67:5001/api',
+  baseURL: baseURL,
+  headers: {
+    "Content-Type": "application/json",
+  },
   timeout: 60000 
 });
 
