@@ -25,7 +25,8 @@ const salarySchema = new Schema({
   workedDays: Number,
   status: String,
   date: String,
-  slipPath: { type: String }
+  slipPath: { type: String },
+  slipPublicId: { type: String }
 });
 
 const attendanceSchema = new Schema({

@@ -425,3 +425,79 @@ exports.getAttendanceSheet = async (req, res) => {
         res.status(500).json({ message: 'Error fetching attendance sheet data' });
     }
 };
+
+// ✅ NEW: Fetch all leave requests (Identical to Admin's)
+exports.getAllLeaveRequests = async (req, res) => {
+    try {
+        const employees = await Employee.find();
+        // Flatten the leave requests and add employee name and the specific leave ID
+        const leaveRequests = employees.flatMap(emp =>
+            emp.leaveRequests.map(lr => ({
+                ...lr.toObject(),
+                employeeName: emp.name,
+                id: lr._id // Use 'id' for consistency with frontend expectations
+            }))
+        );
+        res.json(leaveRequests);
+    } catch (error) {
+        res.status(500).json({ message: 'Error fetching leave requests' });
+    }
+};
+
+// ✅ NEW: Approve a leave request (Identical to Admin's logic)
+exports.approveLeaveRequest = async (req, res) => {
+    const io = req.app.get('socketio');
+    try {
+        // Find the employee whose leave request matches the ID
+        const employee = await Employee.findOne({ 'leaveRequests._id': req.params.leaveId });
+        if (!employee) {
+            return res.status(404).json({ message: 'Leave request not found.' });
+        }
+        
+        // Get the specific subdocument
+        const leaveRequest = employee.leaveRequests.id(req.params.leaveId);
+        if (!leaveRequest) {
+             return res.status(404).json({ message: 'Leave request subdocument not found.' });
+        }
+
+        leaveRequest.status = 'Approved';
+        await employee.save();
+
+        // Emit update ONLY to the employee who applied
+        io.to(employee._id.toString()).emit('leave_status_updated', leaveRequest);
+
+        res.json(leaveRequest); // Send back the updated leave request
+    } catch (error) {
+        console.error("Error approving leave:", error);
+        res.status(500).json({ message: 'Error approving leave request' });
+    }
+};
+
+// ✅ NEW: Reject a leave request (Identical to Admin's logic)
+exports.rejectLeaveRequest = async (req, res) => {
+    const io = req.app.get('socketio');
+    const { rejectionReason } = req.body; // Get reason from request body
+    try {
+        const employee = await Employee.findOne({ 'leaveRequests._id': req.params.leaveId });
+        if (!employee) {
+            return res.status(404).json({ message: 'Leave request not found.' });
+        }
+        
+        const leaveRequest = employee.leaveRequests.id(req.params.leaveId);
+         if (!leaveRequest) {
+             return res.status(404).json({ message: 'Leave request subdocument not found.' });
+        }
+
+        leaveRequest.status = 'Rejected';
+        leaveRequest.rejectionReason = rejectionReason; // Save the reason
+        await employee.save();
+
+        // Emit update ONLY to the employee who applied
+        io.to(employee._id.toString()).emit('leave_status_updated', leaveRequest);
+
+        res.json(leaveRequest);
+    } catch (error) {
+        console.error("Error rejecting leave:", error);
+        res.status(500).json({ message: 'Error rejecting leave request' });
+    }
+};

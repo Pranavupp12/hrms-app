@@ -14,8 +14,7 @@ interface SalarySlipModalProps {
 export function SalarySlipModal({ isOpen, onClose, slipPath }: SalarySlipModalProps) {
   if (!slipPath) return null;
 
-  // Construct the full URL to the PDF, ensuring the backend URL is correct
-  const pdfUrl = `http://localhost:5001/${slipPath.replace(/\\/g, '/')}`;
+  console.log("Loading PDF from:", slipPath);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -25,7 +24,7 @@ export function SalarySlipModal({ isOpen, onClose, slipPath }: SalarySlipModalPr
         </DialogHeader>
         <div className="flex-grow w-full px-6 pb-6">
           <iframe
-            src={pdfUrl}
+            src={slipPath} // ✅ USE slipPath DIRECTLY HERE
             width="100%"
             height="100%"
             title="Salary Slip"

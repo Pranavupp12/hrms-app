@@ -47,6 +47,7 @@ import { socket } from '../../socket';
 import { PaginationControls } from "../../components/shared/PaginationControls";
 import { Separator } from "@/components/ui/separator";
 import { ViewTaskModal } from "../../components/shared/ViewTaskModal";
+import { RejectLeaveModal } from "../../components/shared/RejectLeaveModal";
 
 const RECORDS_PER_PAGE = 10;
 
@@ -148,6 +149,8 @@ export function HrDashboard() {
     const [isCompletingTask, setIsCompletingTask] = useState(false);
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
+    const [pendingLeaveRequests, setPendingLeaveRequests] = useState<(LeaveRequest & { employeeName: string; id: string })[]>([]);
+
     // ✅ 3. Add state to manage pagination for each table
     const [pagination, setPagination] = useState({
         myAttendance: 1,
@@ -158,6 +161,7 @@ export function HrDashboard() {
         myLeaveRequests: 1,
         employeeManagement: 1,
         manualMarking: 1,
+        pendingLeaves: 1,
     });
 
     const handlePageChange = (table: keyof typeof pagination, page: number) => {
@@ -196,6 +200,7 @@ export function HrDashboard() {
                 hrEventsRes,
                 hrLeavesRes,
                 userTaskRes,
+                pendingLeavesRes,
             ] = await Promise.all([
                 api.get("/hr/employees"),
                 api.get("/hr/notifications"),
@@ -206,6 +211,7 @@ export function HrDashboard() {
                 api.get(`/events/${user.id}`),
                 api.get(`/employees/${user.id}/leaves`),
                 api.get(`/tasks/user/${user.id}`),
+                api.get("/hr/leave-requests")
             ]);
 
             setAllEmployees(employeesRes.data);
@@ -216,7 +222,8 @@ export function HrDashboard() {
             setHrSalaryHistory(hrSalaryRes.data);
             setHrEvents(hrEventsRes.data);
             setHrLeaveRequests(hrLeavesRes.data);
-            setPersonalTasks(userTaskRes.data)
+            setPersonalTasks(userTaskRes.data);
+            setPendingLeaveRequests(pendingLeavesRes.data);
 
             const today = new Date().toISOString().slice(0, 10);
             const myTodaysAttendance = hrAttendanceRes.data.find((att: any) => att.date === today);
@@ -251,7 +258,7 @@ export function HrDashboard() {
         } catch (error) {
             toast.error("Failed to fetch dashboard data.");
         }
-    }, [allAttendanceFilter]);
+    }, [allAttendanceFilter, user.id]);
 
     // ✅ 4. Add useEffects to reset pagination when filters change
     useEffect(() => {
@@ -271,6 +278,8 @@ export function HrDashboard() {
     }, [filterYear, filterMonth]);
 
     useEffect(() => { handlePageChange('manualMarking', 1); }, [selectedEmployeeForMarking]);
+
+    useEffect(() => { handlePageChange('pendingLeaves', 1); }, []);
 
     //  Handles Authentication & Authorization
     // This runs only once when the component mounts.
@@ -363,6 +372,28 @@ export function HrDashboard() {
         }
     };
 
+    const handleApproveLeave = async (leaveId: string) => {
+        try {
+            await api.put(`/hr/leave-requests/${leaveId}/approve`);
+            fetchData(); // Refresh data to update the table
+            toast.success(`Leave request has been approved.`);
+        } catch (error) {
+            toast.error("Failed to approve leave request.");
+        }
+    };
+
+    const handleRejectLeave = async (leaveId: string, reason: string) => {
+        try {
+            await api.put(`/hr/leave-requests/${leaveId}/reject`, {
+                rejectionReason: reason,
+            });
+            fetchData(); // Refresh data to update the table
+            toast.error(`Leave request has been rejected.`);
+        } catch (error) {
+            toast.error("Failed to reject leave request.");
+        }
+    };
+
     useEffect(() => {
         // Join a private room for this HR user's ID
         if (user.id) {
@@ -371,15 +402,14 @@ export function HrDashboard() {
 
         // --- WebSocket Event Listeners for HR ---
 
-        // use this event when hr has function to approve or reject leave
-        { /*// 1. Listen for new leave requests from any employee
+        // 1. Listen for new leave requests from any employee
         const handleNewLeaveRequest = (newRequest: any) => {
             toast.info(`${newRequest.employeeName} has applied for leave.`);
-            // If HR has a pending leave requests table, update it
+            setPendingLeaveRequests(prev => [newRequest, ...prev]);
             // For now, we can assume it triggers a refetch or updates a stat
             fetchData(); // Simplest way to stay in sync
         };
-        socket.on('new_leave_request', handleNewLeaveRequest);*/}
+        socket.on('new_leave_request', handleNewLeaveRequest);
 
         // 2. Listen for personal notifications sent to this HR user
         const handleNewNotification = (newNotification: AppNotification) => {
@@ -394,7 +424,7 @@ export function HrDashboard() {
         const handleAttendanceUpdate = (_updatedRecord: AllUserAttendance) => {
             // If the HR user is on the attendance tab, refresh the data to see the live update
             fetchData();
-         
+
         };
         socket.on('attendance_updated', handleAttendanceUpdate);
 
@@ -464,7 +494,7 @@ export function HrDashboard() {
 
         // --- Cleanup Listeners ---
         return () => {
-            //socket.off('new_leave_request', handleNewLeaveRequest);
+            socket.off('new_leave_request', handleNewLeaveRequest);
             socket.off('new_notification', handleNewNotification);
             socket.off('attendance_updated', handleAttendanceUpdate);
             socket.off('employee_added', handleEmployeeAdded);
@@ -738,6 +768,12 @@ export function HrDashboard() {
         (pagination.manualMarking - 1) * RECORDS_PER_PAGE,
         pagination.manualMarking * RECORDS_PER_PAGE
     ) || [];
+
+    const totalPendingLeavePages = Math.ceil(pendingLeaveRequests.length / RECORDS_PER_PAGE);
+    const paginatedPendingLeaves = pendingLeaveRequests.slice(
+        (pagination.pendingLeaves - 1) * RECORDS_PER_PAGE,
+        pagination.pendingLeaves * RECORDS_PER_PAGE
+    );
 
 
 
@@ -1141,7 +1177,67 @@ export function HrDashboard() {
                         </Card>
                     </TabsContent>
 
-                    <TabsContent value="leave-requests" className="mt-4">
+                    <TabsContent value="leave-requests" className="mt-4 space-y-6">
+                        {/* PENDING REQUESTS */}
+                        <Card>
+                            <CardHeader><CardTitle>Pending Leave Requests</CardTitle></CardHeader>
+                            <CardContent>
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>S.No</TableHead>
+                                            <TableHead>Employee</TableHead>
+                                            <TableHead>Type</TableHead>
+                                            <TableHead>Dates</TableHead>
+                                            <TableHead>Reason</TableHead>
+                                            <TableHead>Status</TableHead>
+                                            <TableHead className="text-right">Actions</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {paginatedPendingLeaves.length > 0 ? (
+                                            paginatedPendingLeaves.map((req, index) => (
+                                                <TableRow key={req.id}>
+                                                    <TableCell>{((pagination.pendingLeaves - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
+                                                    <TableCell>{req.employeeName}</TableCell>
+                                                    <TableCell>{req.type}</TableCell>
+                                                    <TableCell>{formatDate(req.startDate)} to {formatDate(req.endDate)}</TableCell>
+                                                    <TableCell className="max-w-xs truncate">{req.reason || "N/A"}</TableCell>
+                                                    <TableCell><Badge variant={req.status === "Pending" ? "default" : req.status === "Approved" ? "default" : "destructive"}>{req.status}</Badge></TableCell>
+                                                    <TableCell className="space-x-2 text-right">
+                                                        {req.status === "Pending" && (
+                                                            <>
+                                                                <Button size="sm" onClick={() => handleApproveLeave(req.id)}>Approve</Button>
+                                                                <RejectLeaveModal onSubmit={(reason) => handleRejectLeave(req.id, reason)}>
+                                                                    <Button size="sm" variant="destructive">Reject</Button>
+                                                                </RejectLeaveModal>
+                                                            </>
+                                                        )}
+                                                        {/* Optionally show comment if rejected */}
+                                                        {req.status === 'Rejected' && req.rejectionReason && (
+                                                            <ViewCommentModal reason={req.rejectionReason}>
+                                                                <Button variant="outline" size="sm">View Comment</Button>
+                                                            </ViewCommentModal>
+                                                        )}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))
+                                        ) : (
+                                            <TableRow>
+                                                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                                                    No pending leave requests found.
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                                <PaginationControls
+                                    currentPage={pagination.pendingLeaves}
+                                    totalPages={totalPendingLeavePages}
+                                    onPageChange={(page) => handlePageChange('pendingLeaves', page)}
+                                />
+                            </CardContent>
+                        </Card>
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between">
                                 <CardTitle>My Leave Requests</CardTitle>

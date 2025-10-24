@@ -3,15 +3,14 @@ const Employee = require('../models/Employee');
 const SentNotification = require('../models/SentNotification');
 const { jsPDF } = require("jspdf");
 const autoTable = require('jspdf-autotable').default;
-const fs = require('fs');
-const path = require('path');
+const cloudinary = require('cloudinary').v2;
 const AdditionalDetails = require('../models/AdditionalDetails');
 const bcrypt = require('bcryptjs');
 
 // Fetch all employees
 exports.getAllEmployees = async (req, res) => {
     try {
-        const employees = await Employee.find().select('-password').populate('additionalDetails');
+        const employees = await Employee.find().select('-password').populate('additionalDetails').sort({ _id: -1 });
         res.json(employees);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching employees' });
@@ -111,8 +110,19 @@ exports.getAllLeaveRequests = async (req, res) => {
     try {
         const employees = await Employee.find();
         const leaveRequests = employees.flatMap(emp => emp.leaveRequests.map(lr => ({ ...lr.toObject(), employeeName: emp.name, id: lr._id })));
+        // Sort the flattened list by leave request ID (most recent first)
+       // Sort the flattened list by the leave request's _id (descending)
+        leaveRequests.sort((a, b) => {
+            // Mongoose ObjectIds can be compared directly, but converting to string is safer
+            const idA = a._id.toString();
+            const idB = b._id.toString();
+            if (idA > idB) return -1; // Newer ID comes first
+            if (idA < idB) return 1;
+            return 0;
+        });
         res.json(leaveRequests);
     } catch (error) {
+        console.error("Error in getAllLeaveRequests:", error);
         res.status(500).json({ message: 'Error fetching leave requests' });
     }
 };
@@ -164,9 +174,16 @@ exports.rejectLeaveRequest = async (req, res) => {
 // Get notifications for the logged-in admin
 exports.getAdminNotifications = async (req, res) => {
     try {
-        const admin = await Employee.findById(req.params.id).populate('notifications.sentBy', 'name role');
+        const admin = await Employee.findById(req.params.id).populate('notifications.sentBy', 'name role').select('notifications');
         if (!admin) return res.status(404).json({ message: 'Admin not found' });
-        res.json(admin.notifications);
+        // Sort notifications array in memory (newest first)
+        const sortedNotifications = admin.notifications.sort((a, b) => {
+            if (a._id > b._id) return -1;
+            if (a._id < b._id) return 1;
+            return 0;
+        }); // ✅ Sort subdocuments
+
+        res.json(sortedNotifications);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching admin notifications' });
     }
@@ -194,7 +211,7 @@ exports.markNotificationAsRead = async (req, res) => {
 // Fetch sent notifications history
 exports.getSentNotifications = async (req, res) => {
     try {
-        const notifications = await SentNotification.find().populate('sentBy', 'name role');
+        const notifications = await SentNotification.find().populate('sentBy', 'name role').sort({ _id: -1 });
         res.json(notifications);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching sent notifications' });
@@ -286,112 +303,29 @@ exports.getSalaryHistory = async (req, res) => {
     try {
         const employees = await Employee.find().select('name salaryHistory');
         const salaryHistory = employees.flatMap(emp => emp.salaryHistory.map(sh => ({ ...sh.toObject(), employeeName: emp.name, id: sh._id })));
+        // Sort combined history (e.g., by date or _id descending)
+        // Sort combined history: newest date first, then newest _id if dates are the same
+        salaryHistory.sort((a, b) => {
+            // Compare dates first (descending)
+            const dateA = new Date(a.date); // Convert string date to Date object
+            const dateB = new Date(b.date);
+            if (dateA > dateB) return -1;
+            if (dateA < dateB) return 1;
+
+            // If dates are the same, compare by _id (descending)
+            const idA = a._id.toString();
+            const idB = b._id.toString();
+            if (idA > idB) return -1;
+            if (idA < idB) return 1;
+
+            return 0;
+        });
         res.json(salaryHistory);
     } catch (error) {
+        console.error("Error in getSalaryHistory:", error); // Add specific logging
         res.status(500).json({ message: 'Error fetching salary history' });
     }
 };
-
-{/*// Punch in salary for an employee
-exports.punchSalary = async (req, res) => {
-    const { employeeIds, grossSalary, deductions, month, workedDays } = req.body;
-    try {
-        if (!Array.isArray(employeeIds) || employeeIds.length === 0) {
-            return res.status(400).json({ message: 'Please select at least one employee.' });
-        }
-
-        const employees = await Employee.find({ _id: { $in: employeeIds } });
-
-        for (const employee of employees) {
-            const gross = parseFloat(grossSalary);
-            const totalDeductions = parseFloat(deductions);
-            const netSalary = gross - totalDeductions;
-
-            const slipDir = path.join(__dirname, '..', 'slips');
-            if (!fs.existsSync(slipDir)) fs.mkdirSync(slipDir, { recursive: true });
-            const slipPath = `slips/slip_${employee._id}_${month.replace(/\s/g, '_')}.pdf`;
-
-            const doc = new jsPDF();
-            
-            doc.setFontSize(20);
-            doc.text("Your Company Name", 105, 20, { align: 'center' });
-            doc.setFontSize(12);
-            doc.text(`Payslip for the month of ${month}`, 105, 30, { align: 'center' });
-
-            autoTable(doc, {
-                startY: 40,
-                head: [['Employee Information', 'Details']],
-                body: [
-                    ['Employee ID', employee._id.toString()],
-                    ['Employee Name', employee.name],
-                    ['Worked Days', workedDays.toString()],
-                ],
-                theme: 'striped',
-                headStyles: { fillColor: [240, 240, 240], textColor: 20 },
-            });
-            
-            const earningsTableY = doc.lastAutoTable.finalY + 10;
-
-            autoTable(doc, {
-                startY: earningsTableY,
-                head: [['Earnings', 'Amount']],
-                body: [['Basic Salary', `${gross.toFixed(2)}`]],
-                theme: 'grid',
-                tableWidth: 85,
-                columnStyles: { 1: { halign: 'right' } }
-            });
-            
-            const earningsFinalY = doc.lastAutoTable.finalY;
-
-            autoTable(doc, {
-                startY: earningsTableY,
-                head: [['Deductions', 'Amount']],
-                body: [['Professional Tax', `${totalDeductions.toFixed(2)}`]],
-                theme: 'grid',
-                tableWidth: 85,
-                margin: { left: 110 },
-                columnStyles: { 1: { halign: 'right' } }
-            });
-
-            const deductionsFinalY = doc.lastAutoTable.finalY;
-            const finalY = Math.max(earningsFinalY, deductionsFinalY);
-
-            autoTable(doc, {
-                startY: finalY + 10,
-                body: [
-                    ['Gross Salary', `${gross.toFixed(2)}`],
-                    ['Total Deductions', `${totalDeductions.toFixed(2)}`],
-                    ['Net Salary', `${netSalary.toFixed(2)}`],
-                ],
-                theme: 'grid',
-                styles: { fontStyle: 'bold' },
-                columnStyles: { 1: { halign: 'right' } }, // Add this for alignment
-            });
-            
-            const pdfOutput = doc.output();
-            fs.writeFileSync(path.join(__dirname, '..', slipPath), pdfOutput);
-
-            const salaryRecord = {
-                amount: netSalary,
-                grossSalary: gross,
-                deductions: totalDeductions,
-                workedDays,
-                month,
-                status: 'Paid',
-                date: new Date().toISOString().slice(0, 10),
-                slipPath,
-            };
-
-            employee.salaryHistory.push(salaryRecord);
-            await employee.save();
-        }
-
-        res.status(201).json({ message: `Successfully created salary slips for ${employees.length} employees.` });
-    } catch (error) {
-        console.error('Error punching salary:', error);
-        res.status(500).json({ message: 'Error creating salary slips' });
-    }
-};*/}
 
 
 // Get all attendance records for ALL users (Employees and Admins)
@@ -405,7 +339,17 @@ exports.getAllAttendance = async (req, res) => {
                 ...att.toObject()
             }))
         );
-        res.json(allAttendance.sort((a, b) => new Date(b.date) - new Date(a.date)));
+        // Sort by date descending
+        allAttendance = allAttendance.sort((a, b) => {
+            if (a.date > b.date) return -1;
+            if (a.date < b.date) return 1;
+            // Optionally add secondary sort if needed (e.g., by name)
+            if (a.employeeName < b.employeeName) return -1;
+            if (a.employeeName > b.employeeName) return 1;
+            return 0;
+        }); // ✅ Sort combined records by date
+        res.json(allAttendance);
+
     } catch (error) {
         res.status(500).json({ message: 'Error fetching attendance records' });
     }
@@ -416,7 +360,12 @@ exports.getAdminAttendance = async (req, res) => {
     try {
         const admin = await Employee.findById(req.params.id).select('attendance');
         if (!admin) return res.status(404).json({ message: 'Admin not found' });
-        res.json(admin.attendance);
+        const sortedAttendance = admin.attendance.sort((a, b) => {
+             if (a.date > b.date) return -1;
+             if (a.date < b.date) return 1;
+             return 0;
+         }); // ✅ Sort subdocuments by date
+        res.json(sortedAttendance);
     } catch (error) {
         res.status(500).json({ message: 'Error fetching admin attendance' });
     }
@@ -668,6 +617,9 @@ exports.getAttendanceSheet = async (req, res) => {
         const monthIndex = new Date(Date.parse(monthName + " 1, 2012")).getMonth();
         const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
 
+        // **Declare processingPromises before the loop**
+        const processingPromises = [];
+
         for (const employee of employees) {
             if (!employee.baseSalary || employee.baseSalary <= 0) {
                 console.warn(`Skipping ${employee.name} due to missing or invalid salary.`);
@@ -699,9 +651,6 @@ exports.getAttendanceSheet = async (req, res) => {
             const leaveDeductions = perDaySalary * unpaidLeaveDays;
             const netSalary = grossEarnings;
 
-            const slipDir = path.join(__dirname, '..', 'slips');
-            if (!fs.existsSync(slipDir)) fs.mkdirSync(slipDir, { recursive: true });
-            const slipPath = `slips/slip_${employee._id}_${month.replace(/\s/g, '_')}.pdf`;
             const doc = new jsPDF();
 
             doc.setFontSize(20);
@@ -760,39 +709,98 @@ exports.getAttendanceSheet = async (req, res) => {
                 columnStyles: { 1: { halign: 'right' } },
             });
             
-            const pdfOutput = doc.output();
-            fs.writeFileSync(path.join(__dirname, '..', slipPath), pdfOutput);
-            
-            const salaryRecord = {
-                amount: netSalary,
-                grossSalary: grossEarnings,
-                deductions: leaveDeductions,
-                workedDays: payableDays,
-                month,
-                status: 'Paid',
-                date: new Date().toISOString().slice(0, 10),
-                slipPath,
-            };
+            // ✅ 2. Get PDF output as a Buffer
+            const pdfBuffer = Buffer.from(doc.output('arraybuffer'));
 
-                // Save the record to the employee's document
-            const updatedEmployee = await Employee.findByIdAndUpdate(
-                employee._id,
-                { $push: { salaryHistory: salaryRecord } },
-                { new: true } // Important: returns the updated document
-            );
+            // ✅ 3. Create a promise to upload the buffer and update the DB
+            const processSlipPromise = new Promise((resolve, reject) => {
+                const uploadOptions = { // Create options object explicitly
+                    folder: "salary-slips",
+                    public_id: `slip_${employee._id}_${month.replace(/\s+/g, '_')}`,
+                    resource_type: "raw",
+                    format: "pdf",
+                    access_mode: "public"
+                };
 
-            // Get the most recent salary record that was just added
-            const newRecord = updatedEmployee.salaryHistory[updatedEmployee.salaryHistory.length - 1];
-            
-            // ✅ 2. Emit a targeted event ONLY to the specific employee
-            io.to(employee._id.toString()).emit('new_salary_record', newRecord);
-            
+                // ✅ ADD THIS CONSOLE LOG
+                console.log(`Uploading slip for ${employee.name} with options:`, uploadOptions);
+
+                const uploadStream = cloudinary.uploader.upload_stream(
+                    uploadOptions,
+                    async (error, result) => { // Make this callback async
+                        if (error) {
+                            console.error(`Cloudinary upload error for ${employee.name}:`, error);
+                            return reject(new Error(`Failed to upload slip for ${employee.name}`));
+                        }
+                        if (!result) {
+                            return reject(new Error(`Cloudinary result empty for ${employee.name}`));
+                        }
+
+                        // Prepare salary record with Cloudinary URL
+                        const salaryRecord = {
+                            amount: netSalary,
+                            grossSalary: grossEarnings,
+                            deductions: leaveDeductions,
+                            workedDays: payableDays,
+                            month,
+                            status: 'Paid', // Or 'Paid'
+                            date: new Date().toISOString().slice(0, 10),
+                            slipPath: result.secure_url, // ✅ Store Cloudinary URL
+                            slipPublicId: result.public_id // ✅ Optional: Store public_id
+                        };
+
+                        try {
+                            // Save the record to the employee's document
+                            const updatedEmployee = await Employee.findByIdAndUpdate(
+                                employee._id,
+                                { $push: { salaryHistory: salaryRecord } },
+                                { new: true } // Return the updated document
+                            );
+
+                            if (updatedEmployee) {
+                                // Get the newly added record
+                                const newRecord = updatedEmployee.salaryHistory[updatedEmployee.salaryHistory.length - 1];
+                                // Emit socket event
+                                io.to(employee._id.toString()).emit('new_salary_record', newRecord);
+                                console.log(`Slip processed and DB updated for ${employee.name}`);
+                                resolve({ success: true, employeeName: employee.name }); // Resolve the promise
+                            } else {
+                                reject(new Error(`Failed to find employee ${employee.name} after update.`));
+                            }
+                        } catch (dbError) {
+                            console.error(`Database update error for ${employee.name}:`, dbError);
+                            // Optional: Try to delete the uploaded Cloudinary file if DB fails
+                            cloudinary.uploader.destroy(result.public_id, { resource_type: 'raw' });
+                            reject(new Error(`Failed to save salary record for ${employee.name}`));
+                        }
+                    }
+                );
+                // Pipe the buffer into the upload stream
+                uploadStream.end(pdfBuffer);
+            });
+
+            processingPromises.push(processSlipPromise);
+        } // End of employee loop
+
+        // ✅ 4. Wait for all uploads and DB updates to complete
+        const results = await Promise.allSettled(processingPromises);
+
+        const successfulCount = results.filter(r => r.status === 'fulfilled').length;
+        const failedCount = results.filter(r => r.status === 'rejected').length;
+
+        let message = `Successfully processed slips for ${successfulCount} employees.`;
+        if (failedCount > 0) {
+            message += ` Failed to process slips for ${failedCount} employees. Check server logs for details.`;
+            // Consider returning a 207 Multi-Status if some failed
+            return res.status(failedCount > 0 ? 207 : 200).json({ message });
         }
 
-        res.status(201).json({ message: `Successfully generated salary slips.` });
+        res.status(200).json({ message }); // Use 200 OK as slips are generated and stored
+
     } catch (error) {
-        console.error('Error generating salary slips:', error);
-        res.status(500).json({ message: 'Error creating salary slips' });
+        console.error('Error in generateSalarySlips function:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Error generating salary slips';
+        res.status(500).json({ message: errorMessage });
     }
 };
 

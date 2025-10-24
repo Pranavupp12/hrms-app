@@ -53,6 +53,7 @@ import { PaginationControls } from "../../components/shared/PaginationControls";
 import { Separator } from "@/components/ui/separator";
 import { AssignTaskModal } from "../../components/shared/AssignTaskModal";
 import { ViewTaskModal } from "../../components/shared/ViewTaskModal";
+import { Loader2 } from "lucide-react";
 
 const RECORDS_PER_PAGE = 10;
 
@@ -177,6 +178,7 @@ export function AdminDashboard() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGeneratingSlips, setIsGeneratingSlips] = useState(false);
 
   // Add state to manage pagination for each table
   const [pagination, setPagination] = useState({
@@ -225,7 +227,7 @@ export function AdminDashboard() {
         attendanceSheetRes,
         eventRes,
         adminLeavesRes,
-        userTasksRes, 
+        userTasksRes,
         adminCreatedTasksRes,
 
       ] = await Promise.all([
@@ -424,18 +426,18 @@ export function AdminDashboard() {
   };
 
   // This effect keeps the modal's prop in sync with the master list
-useEffect(() => {
-  if (employeeForUploads) {
-    // Find the "fresh" version of that employee from the 'allEmployees' list
-    // which was just updated by fetchData
-    const freshEmployee = allEmployees.find(emp => emp._id === employeeForUploads._id);
-    if (freshEmployee) {
-      // Now, update the 'employeeForUploads' state.
-      // This will pass the new prop to the modal and force it to re-render.
-      setEmployeeForUploads(freshEmployee);
+  useEffect(() => {
+    if (employeeForUploads) {
+      // Find the "fresh" version of that employee from the 'allEmployees' list
+      // which was just updated by fetchData
+      const freshEmployee = allEmployees.find(emp => emp._id === employeeForUploads._id);
+      if (freshEmployee) {
+        // Now, update the 'employeeForUploads' state.
+        // This will pass the new prop to the modal and force it to re-render.
+        setEmployeeForUploads(freshEmployee);
+      }
     }
-  }
-}, [allEmployees]);
+  }, [allEmployees]);
 
   useEffect(() => {
     // Join a private room for this admin's user ID
@@ -450,6 +452,7 @@ useEffect(() => {
       toast.info(`${newRequest.employeeName} has applied for leave.`);
       // Add to the top of the table and update home stats
       setLeaveRequests(prev => [newRequest, ...prev]);
+      fetchData();
     };
     socket.on('new_leave_request', handleNewLeaveRequest);
 
@@ -457,7 +460,7 @@ useEffect(() => {
     const handleNewNotification = (newNotification: AppNotification) => {
       toast.info(`New notification received: ${newNotification.message}`);
       // Add to the top of the list and update unread status
-      //setAdminNotifications(prev => [newNotification, ...prev]);
+      setAdminNotifications(prev => [newNotification, ...prev]);
       fetchData();
       setHasUnread(true);
     };
@@ -500,7 +503,7 @@ useEffect(() => {
 
     // --- Salary History Listener ---
     const handleNewSalaryRecord = (newRecord: Salary) => {
-      toast.success("Your new salary slip has been generated!");
+      //toast.success(" new salary slip has been generated!");
       setAdminSalaryHistory(prev => [newRecord, ...prev]);
     };
     socket.on('new_salary_record', handleNewSalaryRecord);
@@ -531,7 +534,7 @@ useEffect(() => {
     const handlePersonalTaskUpdate = () => {
       // Refetch personal tasks
       api.get(`/tasks/user/${user.id}`).then(res => setPersonalTasks(Array.isArray(res.data) ? res.data : []));
-     
+
     };
     socket.on('personal_task_update', handlePersonalTaskUpdate);
 
@@ -567,7 +570,7 @@ useEffect(() => {
       // will be passed to the modal, forcing it to update.
       fetchData();
     };
-    
+
     socket.on('employee_details_updated', handleEmployeeDetailsUpdated);
 
 
@@ -616,7 +619,7 @@ useEffect(() => {
   };
 
   const handleSaveEmployee = async (formData: FormData) => {
-  setIsSubmitting(true);
+    setIsSubmitting(true);
     try {
       if (editingEmployee) {
         await api.put(`/admin/employees/${editingEmployee._id}`, formData, {
@@ -635,9 +638,9 @@ useEffect(() => {
       fetchData();
     } catch (error) {
       toast.error("Failed to save employee.");
-    }finally {
-    setIsSubmitting(false); // <-- 2. SET LOADING TO FALSE (even if it fails)
-  }
+    } finally {
+      setIsSubmitting(false); // <-- 2. SET LOADING TO FALSE (even if it fails)
+    }
   };
 
   const handleApproveLeave = async (leaveId: string) => {
@@ -741,6 +744,9 @@ useEffect(() => {
     if (salaryEmployeeIds.length === 0 || !salaryMonth.trim()) {
       return toast.error("Please select employee(s) and a pay period.");
     }
+    setIsGeneratingSlips(true); // ✅ Set loading to true
+    const loadingToastId = toast.loading("Generating and uploading salary slips...");
+
     try {
       await api.post("/admin/generate-salary", {
         employeeIds: salaryEmployeeIds,
@@ -750,8 +756,14 @@ useEffect(() => {
       toast.success(`Salary slips are being generated for ${salaryEmployeeIds.length} employee(s).`);
       setSalaryEmployeeIds([]);
       setSalaryMonth("");
-    } catch (error) {
-      toast.error("Failed to generate salary slips.");
+    } catch (error: any) { // Type error for better handling
+      // Try to get a specific error message from the backend response
+      const errorMessage = error.response?.data?.message || "Failed to generate salary slips.";
+      toast.error(errorMessage, { id: loadingToastId });
+      console.error("Error generating slips:", error); // Log the full error
+    } finally {
+      setIsGeneratingSlips(false); // ✅ Set loading to false (always runs)
+      toast.dismiss(loadingToastId);
     }
   };
 
@@ -840,13 +852,13 @@ useEffect(() => {
 
   const handleMarkTaskAsComplete = async (taskId: string) => {
     setIsCompletingTask(true);
-    try { 
-      await api.put(`/tasks/${taskId}/status`); 
+    try {
+      await api.put(`/tasks/${taskId}/status`);
       toast.success("Task marked as complete!");
       setIsViewTaskModalOpen(false);
       setSelectedTask(null);
-    } catch (error) { 
-      toast.error("Failed to update task status."); 
+    } catch (error) {
+      toast.error("Failed to update task status.");
     } finally {
       setIsCompletingTask(false);
     }
@@ -1030,7 +1042,7 @@ useEffect(() => {
         isOpen={isAdminTaskModalOpen}
         onClose={() => setIsAdminTaskModalOpen(false)}
         onSubmit={handleCreateAssignedTask}
-        employees={allEmployees} 
+        employees={allEmployees}
       />
       <AssignTaskModal
         isOpen={isUpdateTaskModalOpen}
@@ -1139,40 +1151,39 @@ useEffect(() => {
             </Card>
 
             <Card>
-                <CardHeader>
-                  <CardTitle>My Assigned Tasks</CardTitle>
-                  <CardDescription>Tasks assigned to you by management.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="overflow-y-auto max-h-64 pr-3">
-                    {sortedPersonalTasks.length > 0 ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {sortedPersonalTasks.map(task => (
-                          <Button
-                            key={task._id}
-                            variant="outline"
-                            className={`h-auto p-3 rounded-lg shadow-sm flex flex-col items-start justify-start text-left ${
-                              task.status === 'Completed' ? 'bg-green-50 border-green-200' : 'bg-white'
+              <CardHeader>
+                <CardTitle>My Assigned Tasks</CardTitle>
+                <CardDescription>Tasks assigned to you by management.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-y-auto max-h-64 pr-3">
+                  {sortedPersonalTasks.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {sortedPersonalTasks.map(task => (
+                        <Button
+                          key={task._id}
+                          variant="outline"
+                          className={`h-auto p-3 rounded-lg shadow-sm flex flex-col items-start justify-start text-left ${task.status === 'Completed' ? 'bg-green-50 border-green-200' : 'bg-white'
                             }`}
-                            onClick={() => openViewTaskModal(task)}
-                          >
-                            <div className="flex justify-between w-full items-start">
-                              <p className={`font-bold text-sm ${task.status === 'Completed' ? 'line-through text-muted-foreground' : 'text-primary'}`}>{task.title}</p>
-                              <Badge variant={task.status === 'Completed' ? 'default' : 'outline'}>{task.status}</Badge>
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-1">From: {task.createdBy.name}</p>
-                            <p className="text-xs text-muted-foreground mt-2 self-end">{formatDate(task.date)}</p>
-                          </Button>
-                        ))}
-                      </div>
-                    ) : <p className="text-sm text-muted-foreground text-center py-4">You have no assigned tasks.</p>}
-                  </div>
-                </CardContent>
-              </Card>
+                          onClick={() => openViewTaskModal(task)}
+                        >
+                          <div className="flex justify-between w-full items-start">
+                            <p className={`font-bold text-sm ${task.status === 'Completed' ? 'line-through text-muted-foreground' : 'text-primary'}`}>{task.title}</p>
+                            <Badge variant={task.status === 'Completed' ? 'default' : 'outline'}>{task.status}</Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">From: {task.createdBy.name}</p>
+                          <p className="text-xs text-muted-foreground mt-2 self-end">{formatDate(task.date)}</p>
+                        </Button>
+                      ))}
+                    </div>
+                  ) : <p className="text-sm text-muted-foreground text-center py-4">You have no assigned tasks.</p>}
+                </div>
+              </CardContent>
+            </Card>
 
             <div className="space-y-4">
               <h3 className="text-4xl font-semibold text-indigo-400">
-                   {monthName} stats
+                {monthName} stats
               </h3>
               <div className="grid gap-4 md:grid-cols-3">
                 <Card className="bg-blue-100"><CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-lg font-medium">Total Days</CardTitle><Calendar /></CardHeader><CardContent><div className="text-7xl">{adminAttendanceStats.totalDaysInMonth}</div></CardContent></Card>
@@ -1500,52 +1511,52 @@ useEffect(() => {
           </TabsContent>
 
           <TabsContent value="task-management" className="mt-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between">
-                  <CardTitle>Assigned Tasks</CardTitle>
-                  <Button onClick={() => setIsAdminTaskModalOpen(true)}>+ Create Task</Button>
-                </CardHeader>
-                <CardContent>
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>S.No</TableHead>
-                          <TableHead>Task Title</TableHead>
-                          <TableHead>Assigned To</TableHead>
-                          <TableHead>Date</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Actions</TableHead>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>Assigned Tasks</CardTitle>
+                <Button onClick={() => setIsAdminTaskModalOpen(true)}>+ Create Task</Button>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>S.No</TableHead>
+                        <TableHead>Task Title</TableHead>
+                        <TableHead>Assigned To</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {paginatedTasks.map((task, index) => (
+                        <TableRow key={task._id}>
+                          <TableCell>{((pagination.allTasks - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
+                          <TableCell>{task.title}</TableCell>
+                          <TableCell>{task.assignedTo?.name || 'N/A'}</TableCell>
+                          <TableCell>{formatDate(task.date)}</TableCell>
+                          <TableCell>
+                            <Badge variant={task.status === 'Completed' ? 'default' : 'outline'}>{task.status}</Badge>
+                          </TableCell>
+                          <TableCell className="space-x-2">
+                            <Button variant="outline" size="sm" onClick={() => openViewTaskModal(task)}>View</Button>
+                            <Button variant="outline" size="sm" onClick={() => openUpdateTaskModal(task)}>Update</Button>
+                            <Button variant="destructive" size="sm" onClick={() => openDeleteTaskModal(task)}>Delete</Button>
+                          </TableCell>
                         </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {paginatedTasks.map((task, index) => (
-                          <TableRow key={task._id}>
-                            <TableCell>{((pagination.allTasks - 1) * RECORDS_PER_PAGE) + index + 1}</TableCell>
-                            <TableCell>{task.title}</TableCell>
-                            <TableCell>{task.assignedTo?.name || 'N/A'}</TableCell>
-                            <TableCell>{formatDate(task.date)}</TableCell>
-                            <TableCell>
-                              <Badge variant={task.status === 'Completed' ? 'default' : 'outline'}>{task.status}</Badge>
-                            </TableCell>
-                            <TableCell className="space-x-2">
-                              <Button variant="outline" size="sm" onClick={() => openViewTaskModal(task)}>View</Button>
-                              <Button variant="outline" size="sm" onClick={() => openUpdateTaskModal(task)}>Update</Button>
-                              <Button variant="destructive" size="sm" onClick={() => openDeleteTaskModal(task)}>Delete</Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  <PaginationControls 
-                    currentPage={pagination.allTasks} 
-                    totalPages={totalTaskPages} 
-                    onPageChange={(page) => handlePageChange('allTasks', page)} 
-                  />
-                </CardContent>
-              </Card>
-            </TabsContent>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <PaginationControls
+                  currentPage={pagination.allTasks}
+                  totalPages={totalTaskPages}
+                  onPageChange={(page) => handlePageChange('allTasks', page)}
+                />
+              </CardContent>
+            </Card>
+          </TabsContent>
 
           <TabsContent value="send-notification" className="mt-4 space-y-6">
             <Card>
@@ -1703,7 +1714,16 @@ useEffect(() => {
                   <Label htmlFor="salary-month">Pay Period (e.g., October 2025)</Label>
                   <Input id="salary-month" type="text" placeholder="Enter month and year..." value={salaryMonth} onChange={(e) => setSalaryMonth(e.target.value)} />
                 </div>
-                <Button onClick={handleGenerateSlips}>Generate Slips</Button>
+                <Button onClick={handleGenerateSlips} disabled={isGeneratingSlips}> {/* ✅ Disable button */}
+                  {isGeneratingSlips ? ( // ✅ Conditional rendering
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    'Generate Slips'
+                  )}
+                </Button>
               </CardContent>
             </Card>
             <Card>

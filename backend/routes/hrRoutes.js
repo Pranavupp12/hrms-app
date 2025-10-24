@@ -50,5 +50,10 @@ router.get('/attendance-sheet', hrController.getAttendanceSheet);
 // Salary History
 router.get('/:id/salaries', hrController.getHrSalaryHistory);
 
+// Leave Management (Similar to Admin)
+router.get('/leave-requests', hrController.getAllLeaveRequests); // New route to get all requests
+router.put('/leave-requests/:leaveId/approve', hrController.approveLeaveRequest); // New route
+router.put('/leave-requests/:leaveId/reject', hrController.rejectLeaveRequest); // New route
+
 
 module.exports = router;
