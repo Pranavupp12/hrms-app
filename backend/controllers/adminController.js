@@ -396,7 +396,7 @@ exports.adminPunchIn = async (req, res) => {
 
         const newAttendance = {
             date: today,
-            checkIn: new Date().toLocaleTimeString('en-IN', { hour12: false }),
+            checkIn: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }),
             checkOut: '',
             status: 'Present'
         };
@@ -442,7 +442,7 @@ exports.adminPunchOut = async (req, res) => {
             return res.status(400).json({ message: 'Cannot punch out without punching in first' });
         }
 
-        attendanceRecord.checkOut = new Date().toLocaleTimeString('en-IN', { hour12: false });
+        attendanceRecord.checkOut = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' , hour12: false });
         await admin.save();
 
         // ✅ 2. Define and emit the updated record
