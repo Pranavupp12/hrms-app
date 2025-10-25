@@ -5,14 +5,16 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 
 interface AddEventModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (eventData: { title: string; description: string; date: string; time: string }) => void;
+  onSubmit: (eventData: { title: string; description: string; date: string; time: string }) => Promise<void> | void;
+  isSubmitting?: boolean;
 }
 
-export function AddEventModal({ isOpen, onClose, onSubmit }: AddEventModalProps) {
+export function AddEventModal({ isOpen, onClose, onSubmit, isSubmitting = false }: AddEventModalProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState('');
@@ -31,15 +33,20 @@ export function AddEventModal({ isOpen, onClose, onSubmit }: AddEventModalProps)
     }
   }, [isOpen]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!title || !date || !time) {
       return toast.error("Title, date, and time are required.");
     }
     if (date < today) {
       return toast.error("Cannot create an event for a past date.");
     }
-    onSubmit({ title, description, date, time });
-    onClose();
+    try {
+      await onSubmit({ title, description, date, time }); // ✅ 6. Await submit
+      onClose(); // Only close on success
+    } catch (error) {
+      // Parent function should show the error toast
+      console.error("Failed to submit event:", error);
+    }
   };
 
   return (
@@ -53,8 +60,17 @@ export function AddEventModal({ isOpen, onClose, onSubmit }: AddEventModalProps)
           <div><Label htmlFor="description">Description (Optional)</Label><Textarea id="description" value={description} onChange={e => setDescription(e.target.value)} /></div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSubmit}>Save Event</Button>
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={isSubmitting}> {/* ✅ 8. Disable */}
+            {isSubmitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              'Save Event'
+            )}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

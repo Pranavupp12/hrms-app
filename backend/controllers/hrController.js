@@ -8,9 +8,10 @@ const bcrypt = require('bcryptjs');
 // Fetch all employees
 exports.getAllEmployees = async (req, res) => {
     try {
-        const employees = await Employee.find().select('-password');
+        const employees = await Employee.find().select('-password').sort({ _id: -1 });
         res.json(employees);
     } catch (error) {
+        console.error("Error in getAllEmployees (HR):", error);
         res.status(500).json({ message: 'Error fetching employees' });
     }
 };
@@ -54,10 +55,20 @@ exports.addEmployee = async (req, res) => {
 // Get notifications for the logged-in HR
 exports.getHrNotifications = async (req, res) => {
     try {
-        const hr = await Employee.findById(req.params.id).populate('notifications.sentBy', 'name role');
+        const hr = await Employee.findById(req.params.id).populate('notifications.sentBy', 'name role').select('notifications');;
         if (!hr) return res.status(404).json({ message: 'HR not found' });
-        res.json(hr.notifications);
+        // ✅ Sort notifications array in memory (newest first by _id)
+        const sortedNotifications = hr.notifications.sort((a, b) => {
+             const idA = a._id.toString();
+             const idB = b._id.toString();
+             if (idA > idB) return -1;
+             if (idA < idB) return 1;
+             return 0;
+        });
+
+        res.json(sortedNotifications);
     } catch (error) {
+        console.error("Error in getHrNotifications:", error);
         res.status(500).json({ message: 'Error fetching HR notifications' });
     }
 };
@@ -84,9 +95,10 @@ exports.markNotificationAsRead = async (req, res) => {
 // Fetch sent notifications history
 exports.getSentNotifications = async (req, res) => {
     try {
-        const notifications = await SentNotification.find().populate('sentBy', 'name role');
+        const notifications = await SentNotification.find().populate('sentBy', 'name role').sort({ _id: -1 });
         res.json(notifications);
     } catch (error) {
+        console.error("Error in getSentNotifications (HR):", error);
         res.status(500).json({ message: 'Error fetching sent notifications' });
     }
 };
@@ -179,8 +191,20 @@ exports.getAllAttendance = async (req, res) => {
                 ...att.toObject()
             }))
         );
-        res.json(allAttendance.sort((a, b) => new Date(b.date) - new Date(a.date)));
+        // ✅ Sort by date descending
+        allAttendance.sort((a, b) => {
+            const dateA = new Date(a.date);
+            const dateB = new Date(b.date);
+            if (dateA > dateB) return -1;
+            if (dateA < dateB) return 1;
+            // Optional secondary sort by name if dates are same
+            if (a.employeeName < b.employeeName) return -1;
+            if (a.employeeName > b.employeeName) return 1;
+            return 0;
+        });
+        res.json(allAttendance);
     } catch (error) {
+        console.error("Error in getAllAttendance (HR):", error);
         res.status(500).json({ message: 'Error fetching attendance records' });
     }
 };
@@ -190,8 +214,18 @@ exports.getHrAttendance = async (req, res) => {
     try {
         const hr = await Employee.findById(req.params.id).select('attendance');
         if (!hr) return res.status(404).json({ message: 'HR not found' });
-        res.json(hr.attendance);
+        // ✅ Sort attendance array in memory (newest date first)
+        const sortedAttendance = hr.attendance.sort((a, b) => {
+            const dateA = new Date(a.date);
+            const dateB = new Date(b.date);
+            if (dateA > dateB) return -1;
+            if (dateA < dateB) return 1;
+            return 0;
+        });
+
+        res.json(sortedAttendance);
     } catch (error) {
+        console.error("Error in getHrAttendance:", error);
         res.status(500).json({ message: 'Error fetching HR attendance' });
     }
 };
@@ -335,8 +369,22 @@ exports.getHrSalaryHistory = async (req, res) => {
     try {
         const hr = await Employee.findById(req.params.id).select('salaryHistory');
         if (!hr) return res.status(404).json({ message: 'HR not found' });
-        res.json(hr.salaryHistory);
+        // ✅ Sort salary history in memory (newest date first, then _id)
+        const sortedHistory = hr.salaryHistory.sort((a, b) => {
+            const dateA = new Date(a.date);
+            const dateB = new Date(b.date);
+            if (dateA > dateB) return -1;
+            if (dateA < dateB) return 1;
+            const idA = a._id.toString();
+            const idB = b._id.toString();
+            if (idA > idB) return -1;
+            if (idA < idB) return 1;
+            return 0;
+        });
+
+        res.json(sortedHistory);
     } catch (error) {
+        console.error("Error in getHrSalaryHistory:", error);
         res.status(500).json({ message: 'Error fetching HR salary history' });
     }
 };
@@ -438,8 +486,18 @@ exports.getAllLeaveRequests = async (req, res) => {
                 id: lr._id // Use 'id' for consistency with frontend expectations
             }))
         );
+        // ✅ Sort the flattened list by the leave request's _id (descending)
+        leaveRequests.sort((a, b) => {
+            const idA = a._id.toString();
+            const idB = b._id.toString();
+            if (idA > idB) return -1; // Newer ID comes first
+            if (idA < idB) return 1;
+            return 0;
+        });
+
         res.json(leaveRequests);
     } catch (error) {
+        console.error("Error in getAllLeaveRequests (HR):", error);
         res.status(500).json({ message: 'Error fetching leave requests' });
     }
 };

@@ -73,7 +73,7 @@ export function AdditionalDetailsPage() {
   const [isUploading, setIsUploading] = useState(false);
   const navigate = useNavigate();
 
-  // ✅ 2. Get the user from localStorage to get their ID
+  // Get the user from localStorage to get their ID
   const user = JSON.parse(localStorage.getItem('user') || '{}');
 
   const fetchDetails = async () => {

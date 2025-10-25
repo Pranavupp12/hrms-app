@@ -6,13 +6,21 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from '@/api'; 
 import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 
 export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleLogin = async () => {
+    if (!email || !password) {
+        toast.error("Please enter both email and password.");
+        return;
+    }
+    
+    setIsLoading(true);
     try {
       const response = await api.post('/auth/login', { email, password });
       
@@ -36,6 +44,8 @@ export function LoginPage() {
     } catch (error) {
       toast.error('Login failed. Please check your credentials.');
       console.error('Login error:', error);
+    } finally {
+      setIsLoading(false); 
     }
   };
 
@@ -59,6 +69,7 @@ export function LoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading}
               />
             </div>
             <div className="grid gap-2">
@@ -69,10 +80,18 @@ export function LoginPage() {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                disabled={isLoading}
               />
             </div>
-            <Button onClick={handleLogin} className="w-full">
-              Sign In
+            <Button onClick={handleLogin} className="w-full" disabled={isLoading}>
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Signing In...
+                </>
+              ) : (
+                'Sign In'
+              )}
             </Button>
             {/* Test Credentials Section */}
             <div className="mt-4 p-4 border rounded-lg bg-gray-50 text-sm text-gray-600">
@@ -85,8 +104,8 @@ export function LoginPage() {
                 </div>
                 <div>
                   <p className="font-semibold">Employee:</p>
-                  <p>Email: <span className="font-mono">john.doe@example.com</span></p>
-                  <p>Password: <span className="font-mono">password123</span></p>
+                  <p>Email: <span className="font-mono">pranav@gmail.com</span></p>
+                  <p>Password: <span className="font-mono">pranavupp12</span></p>
                 </div>
                 <div>
                   <p className="font-semibold">HR:</p>

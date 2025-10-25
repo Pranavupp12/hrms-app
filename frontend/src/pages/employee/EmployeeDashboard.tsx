@@ -20,6 +20,7 @@ import { socket } from '../../socket';
 import { PaginationControls } from "../../components/shared/PaginationControls";
 import { Separator } from "@/components/ui/separator";
 import { ViewTaskModal } from "../../components/shared/ViewTaskModal";
+import { Loader2 } from "lucide-react";
 
 const RECORDS_PER_PAGE = 10;
 
@@ -79,6 +80,9 @@ export function EmployeeDashboard() {
   const [isViewTaskModalOpen, setIsViewTaskModalOpen] = useState(false);
   const [isCompletingTask, setIsCompletingTask] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
+  const [isLeaveSubmitting, setIsLeaveSubmitting] = useState(false);
+  const [isSubmittingEvent, setIsSubmittingEvent] = useState(false);
 
   // ✅ 3. Add state for pagination
   const [pagination, setPagination] = useState({
@@ -196,7 +200,7 @@ export function EmployeeDashboard() {
       socket.emit('join_room', user.id);
     }
 
-    // --- WebSocket Event Listeners for Employee ---
+    // --- Web Socket Event Listeners for Employee ---
 
     // 1. Listen for personal notifications sent to this employee
     const handleNewNotification = (newNotification: AppNotification) => {
@@ -247,7 +251,7 @@ export function EmployeeDashboard() {
       socket.off('new_salary_record', handleNewSalaryRecord);
       socket.off('personal_task_update', handlePersonalTaskUpdate);
     };
-  }, [user.id]);
+  }, [user.id, fetchData]);
 
 
   const attendanceStats = useMemo(() => {
@@ -383,12 +387,16 @@ export function EmployeeDashboard() {
   };
 
   const handleLeaveSubmit = async (newLeaveRequestData: Omit<LeaveRequest, '_id' | 'status' | 'rejectionReason'>) => {
+    setIsLeaveSubmitting(true);
     try {
       await api.post(`/employees/${user.id}/leaves`, newLeaveRequestData);
       fetchData();
       toast.success("Leave request submitted successfully!");
     } catch (error) {
       toast.error("Failed to submit leave request.");
+      console.error("Leave submission error:", error);
+    } finally {
+      setIsLeaveSubmitting(false); // ✅ Set loading false
     }
   };
 
@@ -412,14 +420,18 @@ export function EmployeeDashboard() {
   };
 
   const handleCreateEvent = async (eventData: { title: string; description: string; date: string; time: string }) => {
-    try {
-      await api.post('/events', { ...eventData, employee: user.id });
-      toast.success("Event created successfully!");
-      fetchData(); // Refresh data to show the new event
-    } catch (error) {
-      toast.error("Failed to create event.");
-    }
-  };
+  setIsSubmittingEvent(true); // ✅ Set loading
+  try {
+    await api.post('/events', { ...eventData, employee: user.id });
+    toast.success("Event created successfully!");
+    fetchData(); // Refresh all data
+  } catch (error) {
+    toast.error("Failed to create event.");
+    throw error; // ✅ Re-throw error so modal stays open
+  } finally {
+    setIsSubmittingEvent(false); // ✅ Unset loading
+  }
+};
 
   if (!employee) {
     return <div className="p-8">Loading...</div>;
@@ -525,7 +537,7 @@ export function EmployeeDashboard() {
         slipPath={selectedSlipPath}
       />
 
-      <AddEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onSubmit={handleCreateEvent} />
+      <AddEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onSubmit={handleCreateEvent} isSubmitting={isSubmittingEvent} />
 
       <MSidebar
         tabs={employeeTabs}
@@ -821,7 +833,7 @@ export function EmployeeDashboard() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>My Leave Requests</CardTitle>
-                <ApplyLeaveModal onSubmit={handleLeaveSubmit}>
+                <ApplyLeaveModal onSubmit={handleLeaveSubmit} isSubmitting={isLeaveSubmitting}>
                   <Button>Apply for Leave</Button>
                 </ApplyLeaveModal>
               </CardHeader>

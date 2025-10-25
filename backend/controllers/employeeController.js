@@ -3,10 +3,20 @@ const Employee = require('../models/Employee');
 // Fetch attendance history for an employee
 exports.getAttendance = async (req, res) => {
     try {
-        const employee = await Employee.findById(req.params.id);
+        const employee = await Employee.findById(req.params.id).select('attendance');
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
-        res.json(employee.attendance);
+        // ✅ Sort attendance array in memory (newest date first)
+        const sortedAttendance = employee.attendance.sort((a, b) => {
+            const dateA = new Date(a.date);
+            const dateB = new Date(b.date);
+            if (dateA > dateB) return -1;
+            if (dateA < dateB) return 1;
+            return 0;
+        });
+
+        res.json(sortedAttendance);
     } catch (error) {
+        console.error("Error fetching employee attendance:", error);
         res.status(500).json({ message: 'Error fetching attendance data' });
     }
 };
@@ -14,10 +24,25 @@ exports.getAttendance = async (req, res) => {
 // Fetch salary history for an employee
 exports.getSalaryHistory = async (req, res) => {
     try {
-        const employee = await Employee.findById(req.params.id);
+        const employee = await Employee.findById(req.params.id).select('salaryHistory');
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
-        res.json(employee.salaryHistory);
+        // ✅ Sort salary history in memory (newest date first, then _id)
+        const sortedHistory = employee.salaryHistory.sort((a, b) => {
+            const dateA = new Date(a.date);
+            const dateB = new Date(b.date);
+            if (dateA > dateB) return -1;
+            if (dateA < dateB) return 1;
+            // Fallback sort by _id if dates are the same
+            const idA = a._id.toString();
+            const idB = b._id.toString();
+            if (idA > idB) return -1;
+            if (idA < idB) return 1;
+            return 0;
+        });
+
+        res.json(sortedHistory);
     } catch (error) {
+        console.error("Error fetching employee salary history:", error);
         res.status(500).json({ message: 'Error fetching salary history' });
     }
 };
@@ -25,10 +50,20 @@ exports.getSalaryHistory = async (req, res) => {
 // Fetch leave requests for an employee
 exports.getLeaveRequests = async (req, res) => {
     try {
-        const employee = await Employee.findById(req.params.id);
+        const employee = await Employee.findById(req.params.id).select('leaveRequests');
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
-        res.json(employee.leaveRequests);
+        // ✅ Sort leave requests array in memory (newest first by _id)
+        const sortedRequests = employee.leaveRequests.sort((a, b) => {
+            const idA = a._id.toString();
+            const idB = b._id.toString();
+            if (idA > idB) return -1;
+            if (idA < idB) return 1;
+            return 0;
+        });
+
+        res.json(sortedRequests);
     } catch (error) {
+        console.error("Error fetching employee leave requests:", error);
         res.status(500).json({ message: 'Error fetching leave requests' });
     }
 };
@@ -50,8 +85,18 @@ exports.applyForLeave = async (req, res) => {
             id: lastLeave._id 
         });
 
-        res.status(201).json(employee.leaveRequests);
+        // ✅ Sort before sending back the full list in the response
+        const sortedRequests = employee.leaveRequests.sort((a, b) => {
+             const idA = a._id.toString();
+             const idB = b._id.toString();
+             if (idA > idB) return -1;
+             if (idA < idB) return 1;
+             return 0;
+        });
+
+        res.status(201).json(sortedRequests);
     } catch (error) {
+        console.error("Error applying for leave:", error);
         res.status(500).json({ message: 'Error applying for leave' });
     }
 };
@@ -59,10 +104,20 @@ exports.applyForLeave = async (req, res) => {
 // Get notifications for an employee
 exports.getNotifications = async (req, res) => {
     try {
-        const employee = await Employee.findById(req.params.id).populate('notifications.sentBy', 'name role');
+        const employee = await Employee.findById(req.params.id).populate('notifications.sentBy', 'name role').select('notifications');
         if (!employee) return res.status(404).json({ message: 'Employee not found' });
-        res.json(employee.notifications);
+        // ✅ Sort notifications array in memory (newest first by _id)
+        const sortedNotifications = employee.notifications.sort((a, b) => {
+             const idA = a._id.toString();
+             const idB = b._id.toString();
+             if (idA > idB) return -1;
+             if (idA < idB) return 1;
+             return 0;
+        });
+
+        res.json(sortedNotifications);
     } catch (error) {
+        console.error("Error fetching employee notifications:", error);
         res.status(500).json({ message: 'Error fetching notifications' });
     }
 };

@@ -32,7 +32,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../../api";
-import { Bell, LogOut, Clock, ChevronsUpDown, Check, X, Briefcase, Bed, Plane, Slice, CheckCircle, XCircle, FileText, Home, Calendar } from "lucide-react";
+import { Bell, LogOut, Clock, ChevronsUpDown, Check, X, Briefcase, Bed, Plane, Slice, CheckCircle, XCircle, FileText, Home, Calendar, Loader2 } from "lucide-react";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { MarkAttendanceModal } from "../../components/shared/MarkAttendanceModal";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -48,6 +48,7 @@ import { PaginationControls } from "../../components/shared/PaginationControls";
 import { Separator } from "@/components/ui/separator";
 import { ViewTaskModal } from "../../components/shared/ViewTaskModal";
 import { RejectLeaveModal } from "../../components/shared/RejectLeaveModal";
+
 
 const RECORDS_PER_PAGE = 10;
 
@@ -150,6 +151,12 @@ export function HrDashboard() {
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
     const [pendingLeaveRequests, setPendingLeaveRequests] = useState<(LeaveRequest & { employeeName: string; id: string })[]>([]);
+    const [isLeaveSubmitting, setIsLeaveSubmitting] = useState(false);
+    const [isSendingNotification, setIsSendingNotification] = useState(false);
+    const [isSubmittingEvent, setIsSubmittingEvent] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isMarkingAttendance, setIsMarkingAttendance] = useState(false);
+    const [isRejectingLeave, setIsRejectingLeave] = useState(false);
 
     // ✅ 3. Add state to manage pagination for each table
     const [pagination, setPagination] = useState({
@@ -383,16 +390,20 @@ export function HrDashboard() {
     };
 
     const handleRejectLeave = async (leaveId: string, reason: string) => {
-        try {
-            await api.put(`/hr/leave-requests/${leaveId}/reject`, {
-                rejectionReason: reason,
-            });
-            fetchData(); // Refresh data to update the table
-            toast.error(`Leave request has been rejected.`);
-        } catch (error) {
-            toast.error("Failed to reject leave request.");
-        }
-    };
+    setIsRejectingLeave(true); // ✅ Set loading
+    try {
+      await api.put(`/hr/leave-requests/${leaveId}/reject`, { // ✅ Use /hr route
+        rejectionReason: reason,
+      });
+      fetchData(); 
+      toast.error(`Leave request has been rejected.`);
+    } catch (error) {
+      toast.error("Failed to reject leave request.");
+      throw error; // ✅ Re-throw error so modal knows it failed
+    } finally {
+      setIsRejectingLeave(false); // ✅ Unset loading
+    }
+  };
 
     useEffect(() => {
         // Join a private room for this HR user's ID
@@ -521,6 +532,7 @@ export function HrDashboard() {
     };
 
     const handleSaveEmployee = async (formData: FormData) => {
+        setIsSubmitting(true);
         try {
             await api.post("/hr/employees", formData, {
                 headers: { "Content-Type": "multipart/form-data" },
@@ -531,6 +543,8 @@ export function HrDashboard() {
             fetchData();
         } catch (error) {
             toast.error("Failed to save employee.");
+        } finally {
+            setIsSubmitting(false); // ✅ Set loading false
         }
     };
 
@@ -544,6 +558,8 @@ export function HrDashboard() {
             toast.error("Please select at least one recipient.");
             return;
         }
+
+        setIsSendingNotification(true);
 
         try {
             const recipientData = notificationRecipients.includes('all') ? 'all' : notificationRecipients;
@@ -560,6 +576,8 @@ export function HrDashboard() {
             setNotificationRecipients(['all']);
         } catch (error) {
             toast.error("Failed to send notification.");
+        } finally {
+            setIsSendingNotification(false); // ✅ Set loading false
         }
 
     };
@@ -593,7 +611,7 @@ export function HrDashboard() {
 
     const handleManualMark = async (newStatus: string) => {
         if (!markingRecord || !selectedEmployeeForMarking) return;
-
+        setIsMarkingAttendance(true);
         try {
             await api.put('/hr/attendance/manual-mark', {
                 employeeId: selectedEmployeeForMarking,
@@ -604,6 +622,9 @@ export function HrDashboard() {
             fetchData(); // Refresh all data
         } catch (error) {
             toast.error("Failed to mark attendance.");
+            throw error; // ✅ Re-throw error
+        } finally {
+            setIsMarkingAttendance(false); // ✅ Unset loading
         }
     };
 
@@ -663,13 +684,16 @@ export function HrDashboard() {
     }, [hrLeaveRequests]);
 
     const handleCreateEvent = async (eventData: { title: string; description: string; date: string; time: string }) => {
+        setIsSubmittingEvent(true); // ✅ Set loading
         try {
-            // We add the 'employee' field, which is the logged-in HR's user ID
             await api.post('/events', { ...eventData, employee: user.id });
             toast.success("Event created successfully!");
-            fetchData(); // Refresh all data to show the new event
+            fetchData(); // Refresh all data
         } catch (error) {
             toast.error("Failed to create event.");
+            throw error; // ✅ Re-throw error so modal stays open
+        } finally {
+            setIsSubmittingEvent(false); // ✅ Unset loading
         }
     };
 
@@ -706,12 +730,16 @@ export function HrDashboard() {
 
     // ✅ 2. Add the function to handle submitting a new leave request
     const handleApplyLeave = async (newLeaveRequest: Omit<LeaveRequest, '_id' | 'status' | 'id'>) => {
+        setIsLeaveSubmitting(true);
         try {
             await api.post(`/employees/${user.id}/leaves`, newLeaveRequest);
             toast.success("Leave request submitted successfully!");
             fetchData(); // Refresh all data to show the new request
         } catch (error) {
             toast.error("Failed to submit leave request.");
+            throw error; // ✅ Re-throw error so modal knows it failed
+        } finally {
+            setIsLeaveSubmitting(false); // ✅ UNSET LOADING
         }
     };
 
@@ -764,7 +792,16 @@ export function HrDashboard() {
     const paginatedMyLeaves = hrLeaveRequests.slice((pagination.myLeaveRequests - 1) * RECORDS_PER_PAGE, pagination.myLeaveRequests * RECORDS_PER_PAGE);
 
     const totalManualMarkingPages = Math.ceil((employeeToMark?.attendance.length || 0) / RECORDS_PER_PAGE);
-    const paginatedManualMarking = employeeToMark?.attendance.slice(
+    // ✅ Create a memoized sorted list
+    const sortedManualMarking_HR = useMemo(() => { // Renamed to avoid conflicts
+        if (!employeeToMark?.attendance) return [];
+        // Sort by date descending (newest first)
+        return [...employeeToMark.attendance].sort((a, b) =>
+            new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+    }, [employeeToMark?.attendance]);
+
+    const paginatedManualMarking = sortedManualMarking_HR.slice( // Use the new sorted variable
         (pagination.manualMarking - 1) * RECORDS_PER_PAGE,
         pagination.manualMarking * RECORDS_PER_PAGE
     ) || [];
@@ -797,6 +834,7 @@ export function HrDashboard() {
                 employee={editingEmployee}
                 viewMode={isViewMode}
                 isHr={true}
+                isSubmitting={isSubmitting}
             />
             {markingRecord && employeeToMark && (
                 <MarkAttendanceModal
@@ -807,6 +845,7 @@ export function HrDashboard() {
                     role={employeeToMark.role}
                     date={formatDate(markingRecord.date) || ''}
                     currentStatus={markingRecord.status}
+                    isSubmitting={isMarkingAttendance}
                 />
             )}
             <SalarySlipModal
@@ -815,7 +854,7 @@ export function HrDashboard() {
                 slipPath={selectedSlipPath}
             />
 
-            <AddEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onSubmit={handleCreateEvent} />
+            <AddEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onSubmit={handleCreateEvent} isSubmitting={isSubmittingEvent} />
 
             <MSidebar
                 tabs={hrTabs}
@@ -1036,13 +1075,19 @@ export function HrDashboard() {
                                 <CardTitle>Manual Marking</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-4">
-                                <div className="w-1/3">
+                                <div className="w-1/3 items-center gap-2">
                                     <Label>Select Employee</Label>
-                                    <Select value={selectedEmployeeForMarking} onValueChange={setSelectedEmployeeForMarking}>
+                                    <Select value={selectedEmployeeForMarking} onValueChange={(value) => {
+                                        setSelectedEmployeeForMarking(value === "clear" ? "" : value);
+                                    }}>
                                         <SelectTrigger>
                                             <SelectValue placeholder="Select an employee..." />
                                         </SelectTrigger>
                                         <SelectContent>
+                                            {/* "Deselect" option */}
+                                            <SelectItem value="clear">
+                                                <span className="italic text-muted-foreground">Close Employee's List</span>
+                                            </SelectItem>
                                             {allEmployees.map(emp => (
                                                 <SelectItem key={emp._id} value={emp._id}>{emp.name}</SelectItem>
                                             ))}
@@ -1208,7 +1253,7 @@ export function HrDashboard() {
                                                         {req.status === "Pending" && (
                                                             <>
                                                                 <Button size="sm" onClick={() => handleApproveLeave(req.id)}>Approve</Button>
-                                                                <RejectLeaveModal onSubmit={(reason) => handleRejectLeave(req.id, reason)}>
+                                                                <RejectLeaveModal onSubmit={(reason) => handleRejectLeave(req.id, reason)} isSubmitting={isRejectingLeave}>
                                                                     <Button size="sm" variant="destructive">Reject</Button>
                                                                 </RejectLeaveModal>
                                                             </>
@@ -1241,7 +1286,7 @@ export function HrDashboard() {
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between">
                                 <CardTitle>My Leave Requests</CardTitle>
-                                <ApplyLeaveModal onSubmit={handleApplyLeave}>
+                                <ApplyLeaveModal onSubmit={handleApplyLeave} isSubmitting={isLeaveSubmitting}>
                                     <Button>Apply for Leave</Button>
                                 </ApplyLeaveModal>
                             </CardHeader>
@@ -1414,8 +1459,15 @@ export function HrDashboard() {
                                         onChange={(e) => setNotificationMessage(e.target.value)}
                                     />
                                 </div>
-                                <Button onClick={handleSendNotification}>
-                                    Send Notification
+                                <Button onClick={handleSendNotification} disabled={isSendingNotification}> {/* ✅ Disable button */}
+                                    {isSendingNotification ? ( // ✅ Conditional rendering
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Sending...
+                                        </>
+                                    ) : (
+                                        'Send Notification'
+                                    )}
                                 </Button>
                             </CardContent>
                         </Card>

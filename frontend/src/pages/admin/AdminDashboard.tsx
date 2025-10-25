@@ -179,6 +179,14 @@ export function AdminDashboard() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGeneratingSlips, setIsGeneratingSlips] = useState(false);
+  const [isLeaveSubmitting, setIsLeaveSubmitting] = useState(false);
+  const [isSendingNotification, setIsSendingNotification] = useState(false);
+  const [isSubmittingEvent, setIsSubmittingEvent] = useState(false);
+  const [isSubmittingTask, setIsSubmittingTask] = useState(false);
+  const [isMarkingAttendance, setIsMarkingAttendance] = useState(false);
+  const [isRejectingLeave, setIsRejectingLeave] = useState(false);
+  const [isDeletingEmployee, setIsDeletingEmployee] = useState(false); // ✅ ADD THIS
+  const [isDeletingTask, setIsDeletingTask] = useState(false);
 
   // Add state to manage pagination for each table
   const [pagination, setPagination] = useState({
@@ -654,6 +662,7 @@ export function AdminDashboard() {
   };
 
   const handleRejectLeave = async (leaveId: string, reason: string) => {
+    setIsRejectingLeave(true); // ✅ Set loading
     try {
       await api.put(`/admin/leave-requests/${leaveId}/reject`, {
         rejectionReason: reason,
@@ -662,6 +671,9 @@ export function AdminDashboard() {
       toast.error(`Leave request has been rejected.`);
     } catch (error) {
       toast.error("Failed to reject leave request.");
+      throw error; // ✅ Re-throw error so modal knows it failed
+    } finally {
+      setIsRejectingLeave(false); // ✅ Unset loading
     }
   };
 
@@ -673,15 +685,18 @@ export function AdminDashboard() {
   // This function performs the actual deletion after confirmation
   const confirmDeleteEmployee = async () => {
     if (!employeeToDelete) return;
+    setIsDeletingEmployee(true); // ✅ Set loading
     try {
       await api.delete(`/admin/employees/${employeeToDelete._id}`);
-      fetchData();
+      fetchData(); // This will refresh the list
       toast.info(`Employee "${employeeToDelete.name}" has been deleted.`);
+      setIsDeleteModalOpen(false); // ✅ Close modal on success
+      setEmployeeToDelete(null);
     } catch (error) {
       toast.error("Failed to delete employee.");
+      throw error; // ✅ Re-throw so modal doesn't close
     } finally {
-      setIsDeleteModalOpen(false);
-      setEmployeeToDelete(null);
+      setIsDeletingEmployee(false); // ✅ Unset loading
     }
   };
 
@@ -699,6 +714,8 @@ export function AdminDashboard() {
       return;
     }
 
+    setIsSendingNotification(true);
+
     try {
       const recipientData = notificationRecipients.includes('all') ? 'all' : notificationRecipients;
 
@@ -714,6 +731,8 @@ export function AdminDashboard() {
       setNotificationRecipients(['all']);
     } catch (error) {
       toast.error("Failed to send notification.");
+    } finally {
+      setIsSendingNotification(false); //  Set loading false
     }
   };
 
@@ -777,7 +796,7 @@ export function AdminDashboard() {
 
   const handleManualMark = async (newStatus: string) => {
     if (!markingRecord || !selectedEmployeeForMarking) return;
-
+    setIsMarkingAttendance(true);
     try {
       await api.put('/admin/attendance/manual-mark', {
         employeeId: selectedEmployeeForMarking,
@@ -788,6 +807,9 @@ export function AdminDashboard() {
       fetchData(); // Refresh all data
     } catch (error) {
       toast.error("Failed to mark attendance.");
+      throw error; // ✅ Re-throw error so modal knows it failed
+    } finally {
+      setIsMarkingAttendance(false); // ✅ Unset loading
     }
   };
 
@@ -802,8 +824,17 @@ export function AdminDashboard() {
 
   // ✅ NEW: Event handlers for the Home tab
   const handleCreateEvent = async (eventData: { title: string; description: string; date: string; time: string }) => {
-    try { await api.post('/events', { ...eventData, employee: user.id }); toast.success("Event created successfully!"); fetchData(); }
-    catch (error) { toast.error("Failed to create event."); }
+    setIsSubmittingEvent(true); // ✅ Set loading
+    try {
+      await api.post('/events', { ...eventData, employee: user.id });
+      toast.success("Event created successfully!");
+      fetchData(); // Refresh all data
+    } catch (error) {
+      toast.error("Failed to create event.");
+      throw error; // ✅ Re-throw error so modal stays open
+    } finally {
+      setIsSubmittingEvent(false); // ✅ Unset loading
+    }
   };
   const handleMarkEventAsComplete = async (eventId: string) => {
     try { setAllEvents(prev => prev.map(e => e._id === eventId ? { ...e, status: 'completed' } : e)); await api.put(`/events/${eventId}/status`); toast.success("Event marked as complete!"); }
@@ -816,37 +847,52 @@ export function AdminDashboard() {
 
   // Admin Task (Task Mgmt Tab)
   const handleCreateAssignedTask = async (taskData: { title: string; description: string; date: string; time: string; assignedTo: string }) => {
+    setIsSubmittingTask(true); // ✅ Set loading
     try {
       await api.post('/tasks', { ...taskData, createdBy: user.id });
       toast.success("Task created and assigned!");
-      setIsAdminTaskModalOpen(false);
+      // No need to close modal, it closes itself on success
+      // setIsAdminTaskModalOpen(false); 
     } catch (error) {
       toast.error("Failed to create task.");
+      throw error; // ✅ Re-throw error so modal knows it failed
+    } finally {
+      setIsSubmittingTask(false); // ✅ Unset loading
     }
   };
 
   const handleUpdateTask = async (taskData: { title: string; description: string; date: string; time: string; assignedTo: string }) => {
     if (!selectedTask) return;
+    setIsSubmittingTask(true); // ✅ Set loading
     try {
       await api.put(`/tasks/${selectedTask._id}`, { ...taskData, createdBy: selectedTask.createdBy._id });
       toast.success("Task updated successfully!");
-      setIsUpdateTaskModalOpen(false);
+      // No need to close modal, it closes itself on success
+      // setIsUpdateTaskModalOpen(false);
       setSelectedTask(null);
     } catch (error) {
       toast.error("Failed to update task.");
+      throw error; // ✅ Re-throw error so modal knows it failed
+    } finally {
+      setIsSubmittingTask(false); // ✅ Unset loading
     }
   };
 
-  const confirmDeleteTask = async () => {
+    const confirmDeleteTask = async () => {
     if (!selectedTask) return;
+    setIsDeletingTask(true); // ✅ Set loading
     try {
       await api.delete(`/tasks/${selectedTask._id}`);
       toast.success("Task deleted successfully!");
+      setIsDeleteTaskModalOpen(false); // ✅ Close modal on success
+      setSelectedTask(null);
+      // You might need to call fetchData() or manually filter the task list here
+      setAdminManagedTasks(prev => prev.filter(t => t._id !== selectedTask._id));
     } catch (error) {
       toast.error("Failed to delete task.");
+      throw error; // ✅ Re-throw so modal doesn't close
     } finally {
-      setIsDeleteTaskModalOpen(false);
-      setSelectedTask(null);
+      setIsDeletingTask(false); // ✅ Unset loading
     }
   };
 
@@ -900,12 +946,16 @@ export function AdminDashboard() {
 
   // ✅ 3. Add the function to handle submitting a new leave request
   const handleApplyLeave = async (newLeaveRequest: Omit<LeaveRequest, '_id' | 'status' | 'id'>) => {
+    setIsLeaveSubmitting(true);
     try {
       await api.post(`/employees/${user.id}/leaves`, newLeaveRequest);
       toast.success("Leave request submitted successfully!");
       fetchData(); // Refresh all data to show the new request
     } catch (error) {
       toast.error("Failed to submit leave request.");
+      throw error;
+    } finally {
+      setIsLeaveSubmitting(false); // ✅ UNSET LOADING
     }
   };
 
@@ -951,7 +1001,20 @@ export function AdminDashboard() {
   const paginatedAllUserAttendance = allUserAttendance.slice((pagination.allUserAttendance - 1) * RECORDS_PER_PAGE, pagination.allUserAttendance * RECORDS_PER_PAGE);
 
   const totalManualMarkingPages = Math.ceil((employeeToMark?.attendance.length || 0) / RECORDS_PER_PAGE);
-  const paginatedManualMarking = employeeToMark?.attendance.slice((pagination.manualMarking - 1) * RECORDS_PER_PAGE, pagination.manualMarking * RECORDS_PER_PAGE) || [];
+  // ✅ Create a memoized sorted list
+  const sortedManualMarking = useMemo(() => {
+    if (!employeeToMark?.attendance) return [];
+    // Sort by date descending (newest first)
+    return [...employeeToMark.attendance].sort((a, b) =>
+      new Date(b.date).getTime() - new Date(a.date).getTime()
+    );
+  }, [employeeToMark?.attendance]);
+
+  const paginatedManualMarking = sortedManualMarking.slice(
+    (pagination.manualMarking - 1) * RECORDS_PER_PAGE,
+    pagination.manualMarking * RECORDS_PER_PAGE
+  ) || [];
+
 
   {/* use this when we paginate attendance sheet section of attendance tab
   const totalAttendanceSheetPages = Math.ceil(attendanceSheetData.sheet.length / RECORDS_PER_PAGE);
@@ -1003,6 +1066,7 @@ export function AdminDashboard() {
         onConfirm={confirmDeleteEmployee}
         title="Are you absolutely sure?"
         description={`This action cannot be undone. This will permanently delete the employee "${employeeToDelete?.name}".`}
+        isSubmitting={isDeletingEmployee}
       />
       <SalarySlipModal
         isOpen={isSlipModalOpen}
@@ -1018,6 +1082,7 @@ export function AdminDashboard() {
           role={employeeToMark.role}
           date={formatDate(markingRecord.date) || ''}
           currentStatus={markingRecord.status}
+          isSubmitting={isMarkingAttendance}
         />
       )}
 
@@ -1028,7 +1093,7 @@ export function AdminDashboard() {
         onDataChange={fetchData}
       />
 
-      <AddEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onSubmit={handleCreateEvent} />
+      <AddEventModal isOpen={isEventModalOpen} onClose={() => setIsEventModalOpen(false)} onSubmit={handleCreateEvent} isSubmitting={isSubmittingEvent} />
 
       <MSidebar
         tabs={adminTabs}
@@ -1043,6 +1108,7 @@ export function AdminDashboard() {
         onClose={() => setIsAdminTaskModalOpen(false)}
         onSubmit={handleCreateAssignedTask}
         employees={allEmployees}
+        isSubmitting={isSubmittingTask}
       />
       <AssignTaskModal
         isOpen={isUpdateTaskModalOpen}
@@ -1050,6 +1116,7 @@ export function AdminDashboard() {
         onSubmit={handleUpdateTask}
         employees={allEmployees}
         taskToUpdate={selectedTask}
+        isSubmitting={isSubmittingTask}
       />
       <ConfirmationModal
         isOpen={isDeleteTaskModalOpen}
@@ -1057,6 +1124,7 @@ export function AdminDashboard() {
         onConfirm={confirmDeleteTask}
         title="Delete Task"
         description="Are you sure you want to delete this task?"
+        isSubmitting={isDeletingTask}
       />
       <ViewTaskModal
         isOpen={isViewTaskModalOpen}
@@ -1296,11 +1364,16 @@ export function AdminDashboard() {
             <Card>
               <CardHeader><CardTitle>Manual Marking</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <div className="w-1/3">
-                  <Label>Select Employee</Label>
-                  <Select value={selectedEmployeeForMarking} onValueChange={setSelectedEmployeeForMarking}>
+                <div className="w-1/3 items-center gap-2">
+                  <Select value={selectedEmployeeForMarking} onValueChange={(value) => {
+                    setSelectedEmployeeForMarking(value === "clear" ? "" : value);
+                  }} >
                     <SelectTrigger><SelectValue placeholder="Select an employee..." /></SelectTrigger>
                     <SelectContent>
+                      {/* "Deselect" option */}
+                      <SelectItem value="clear">
+                        <span className="italic text-muted-foreground">Close Employee's List</span>
+                      </SelectItem>
                       {allEmployees.map(emp => <SelectItem key={emp._id} value={emp._id}>{emp.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -1408,7 +1481,7 @@ export function AdminDashboard() {
                           {req.status === "Pending" && (
                             <>
                               <Button size="sm" onClick={() => handleApproveLeave(req.id)}>Approve</Button>
-                              <RejectLeaveModal onSubmit={(reason) => handleRejectLeave(req.id, reason)}>
+                              <RejectLeaveModal onSubmit={(reason) => handleRejectLeave(req.id, reason)} isSubmitting={isRejectingLeave} >
                                 <Button size="sm" variant="destructive">Reject</Button>
                               </RejectLeaveModal>
                             </>
@@ -1425,7 +1498,7 @@ export function AdminDashboard() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>My Leave Requests</CardTitle>
-                <ApplyLeaveModal onSubmit={handleApplyLeave}>
+                <ApplyLeaveModal onSubmit={handleApplyLeave} isSubmitting={isLeaveSubmitting} >
                   <Button>Apply for Leave</Button>
                 </ApplyLeaveModal>
               </CardHeader>
@@ -1598,7 +1671,16 @@ export function AdminDashboard() {
                   <Label htmlFor="message">Message</Label>
                   <Textarea id="message" placeholder="Type your notification here..." value={notificationMessage} onChange={(e) => setNotificationMessage(e.target.value)} />
                 </div>
-                <Button onClick={handleSendNotification}>Send Notification</Button>
+                <Button onClick={handleSendNotification} disabled={isSendingNotification}> {/* ✅ Disable button */}
+                  {isSendingNotification ? ( // ✅ Conditional rendering
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    'Send Notification'
+                  )}
+                </Button>
               </CardContent>
             </Card>
             <Card>

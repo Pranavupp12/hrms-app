@@ -1,5 +1,3 @@
-// frontend/src/components/shared/MarkAttendanceModal.tsx
-
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,33 +8,47 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { manualAttendanceStatuses } from "@/types"; // Import the array from your types file
+import { Loader2 } from "lucide-react"; // ✅ 1. Import Loader
 
 interface MarkAttendanceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (newStatus: string) => void;
+  onSubmit: (newStatus: string) => Promise<void> | void; // ✅ 2. Allow async
   employeeName: string;
   role: string;
   date: string;
   currentStatus: string;
+  isSubmitting?: boolean; // ✅ 3. Add isSubmitting prop
 }
 
-export function MarkAttendanceModal({ 
-    isOpen, 
-    onClose, 
-    onSubmit, 
-    employeeName, 
-    role, 
-    date, 
-    currentStatus 
+export function MarkAttendanceModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  employeeName,
+  role,
+  date,
+  currentStatus,
+  isSubmitting = false // ✅ 4. Accept prop
 }: MarkAttendanceModalProps) {
   const [newStatus, setNewStatus] = useState(currentStatus);
 
-  const handleSubmit = () => {
-    onSubmit(newStatus);
-    onClose();
+  // Update local state if the currentStatus prop changes (e.g., modal re-opens)
+  useEffect(() => {
+    setNewStatus(currentStatus);
+  }, [currentStatus, isOpen]);
+
+  const handleSubmit = async () => { // ✅ 5. Make async
+    try {
+      await onSubmit(newStatus);
+      onClose(); // Close only on success
+    } catch (error) {
+      // Parent component will show the error toast
+      console.error("Failed to mark attendance:", error);
+      // Don't close modal if it failed
+    }
   };
 
   return (
@@ -58,7 +70,7 @@ export function MarkAttendanceModal({
             <Label htmlFor="status" className="text-right">
               Status:
             </Label>
-            <Select value={newStatus} onValueChange={setNewStatus}>
+            <Select value={newStatus} onValueChange={setNewStatus} disabled={isSubmitting}> {/* ✅ 6. Disable */}
               <SelectTrigger className="col-span-3">
                 <SelectValue placeholder="Select status" />
               </SelectTrigger>
@@ -71,8 +83,17 @@ export function MarkAttendanceModal({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSubmit}>Save Changes</Button>
+          <Button variant="outline" onClick={onClose} disabled={isSubmitting}>Cancel</Button> {/* ✅ 7. Disable */}
+          <Button onClick={handleSubmit} disabled={isSubmitting}> {/* ✅ 7. Disable */}
+            {isSubmitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              'Save Changes'
+            )}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
