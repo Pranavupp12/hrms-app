@@ -20,7 +20,7 @@ import { socket } from '../../socket';
 import { PaginationControls } from "../../components/shared/PaginationControls";
 import { Separator } from "@/components/ui/separator";
 import { ViewTaskModal } from "../../components/shared/ViewTaskModal";
-import { Loader2 } from "lucide-react";
+//import { Loader2 } from "lucide-react";
 
 const RECORDS_PER_PAGE = 10;
 
